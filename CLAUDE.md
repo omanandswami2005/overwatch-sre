@@ -123,7 +123,9 @@ replacement for what HolmesGPT's toolset config used to provide (see
 | `backend/Dockerfile` | `python:3.11-slim` + apt (WeasyPrint native libs) + fastapi/uvicorn/anthropic/docker/pyyaml/requests/markdown/weasyprint via `uv` | B |
 | `grafana/provisioning/`, `grafana/dashboards/overwatch.json` | Provisioned Prometheus+Jaeger datasources, one real dashboard | A |
 | `scripts/demo-trigger.sh` | One-command demo reset/trigger (`leak`/`crash`/`slow`/`reset`), no raw `curl` needed | — |
-| `ui/app.py` | Streamlit chat UI, pure HTTP client against the backend, no logic of its own | C |
+| `ui/app.py` | Multi-page router (`st.navigation`) — landing page (`/`) + console (`/main`) | C |
+| `ui/api.py` | The only module in `ui/` that talks to the network — thin HTTP client against the backend | C |
+| `ui/theme.py`, `ui/components/`, `ui/views/` | Modular Streamlit UI: reusable components + per-route views | C |
 | `ui/.streamlit/config.toml` | Dark theme tokens matching UI-DESIGN.md | C |
 | `docker-compose.yml` | Orchestrates all 7 containers; backend gets Docker socket + `backend-data` volume (audit log + wiki + reports) | A/B |
 | `.env.example` | Template for `.env` — `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `HAIKU_MODEL`, `SLACK_WEBHOOK_URL`, `WATCH_*` — `.env` itself is gitignored | — |
@@ -157,7 +159,8 @@ starting.
   a future UI button trigger a scenario without knowing `target-app` exists directly.
 - `GET /healthz` → liveness check.
 
-UI renders strictly against this shape — see `ui/app.py`'s `fetch_audit()` / chat flow. Don't
+UI renders strictly against this shape — see `ui/api.py` (the only network-facing module) and
+`ui/components/chat.py`/`vitals.py`. Don't
 change the contract without updating both sides.
 
 ## Conventions
@@ -178,7 +181,7 @@ change the contract without updating both sides.
   A-1`) before starting; commit directly to `main` unless mid-breakage.
 - Design tokens (colors, type, copy voice) for the UI are canonical in
   [docs/UI-DESIGN.md](docs/UI-DESIGN.md) — check there before changing anything visual in
-  `ui/app.py` or `ui/.streamlit/config.toml`.
+  `ui/theme.py`, `ui/components/`, or `ui/.streamlit/config.toml`.
 
 ## Known gaps / unverified as of last read
 

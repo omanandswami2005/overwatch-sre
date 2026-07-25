@@ -8,16 +8,26 @@ STATUS_COLOR = {"healthy": "#35D0A6", "degraded": "#F5A623", "down": "#E4483C"}
 
 
 def vitals_status(events) -> tuple[str, str]:
-    """Derives status from the latest real audit event — never a client-side
-    guess, per the UI's 'owns no business logic' rule."""
+    """Derives status from the latest real ask/approve audit event — never a
+    client-side guess, per the UI's 'owns no business logic' rule.
+
+    Scans backward for the most recent ask/approve rather than trusting
+    events[-1]: the backend appends librarian/report_generated events after
+    approve, so the literal last event isn't always the one that carries
+    status (e.g. approve -> librarian means events[-1]["type"] == "librarian").
+    """
     if events is None:
         return "down", "backend unreachable"
-    if events:
-        last = events[-1]
-        if last.get("type") == "ask" and last.get("recommended_action"):
-            return "degraded", "awaiting approval"
-        if last.get("type") == "approve" and last.get("result", {}).get("status") == "restarted":
-            return "healthy", "recovering"
+    for event in reversed(events):
+        event_type = event.get("type")
+        if event_type == "approve":
+            if event.get("result", {}).get("status") == "restarted":
+                return "healthy", "recovering"
+            continue
+        if event_type == "ask":
+            if event.get("recommended_action"):
+                return "degraded", "awaiting approval"
+            return "healthy", "healthy"
     return "healthy", "healthy"
 
 

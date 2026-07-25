@@ -131,17 +131,26 @@ in `CLAUDE.md`.
     `39329720...`, `a31fe84d...`) and real timestamps from the real audit log, no hallucinated
     data. PDF confirmed via the `file` command: `PDF document, version 1.7`, real byte content,
     not an empty/broken file.
-- **No UI changes made** in any of this session's backend work — confirmed by design, and by
-  `git status` showing zero touches to `ui/app.py` throughout.
-
-## In progress right now
-
-- **Merging Lane C's UI work from the `Prasad` branch** — teammate pushed real UI work to
-  `origin/Prasad`. Plan: diff against `main`, keep all UI code, decide file-by-file on anything
-  else that differs, merge, then test the real UI against this backend end-to-end (not just
-  curl) before calling it done. Backend's HTTP contract (`/ask`, `/approve/{id}`, `/audit`,
-  `/incidents`) hasn't changed shape, so this should be a clean merge, but verify for real rather
-  than assuming.
+- **No UI changes made** in any of this session's backend work (up to the merge below) —
+  confirmed by design, and by `git status` showing zero touches to `ui/app.py` throughout.
+- **Merged Lane C's UI work from the `Prasad` branch** — real multi-page Streamlit UI (landing
+  page + `/main` console): `theme.py`, `api.py`, `components/` (chat, vitals, audit drawer,
+  decisions, proactive, safety, stack, try-it, verified, footer, hero, how-it-works, landing),
+  `views/` (landing_page, main_page), plus `docs/SRS-PRD.md`. Every file merged cleanly,
+  including `ui/Dockerfile` where both branches had touched non-overlapping lines (kept the new
+  `COPY components/ views/` lines *and* the BuildKit cache-mount speedup).
+  - **Verified for real, not just merged**: rebuilt the actual `ui` image, confirmed both `/` and
+    `/main` serve real HTTP 200s through the running container.
+  - **Found and fixed a real bug from the branch-timing gap**: `ui/components/vitals.py`'s
+    `vitals_status()` read only `events[-1]` to derive the status pill — but `Prasad` was forked
+    before the librarian/report-generation work landed, and the backend now appends
+    `librarian`/`report_generated` audit events *after* `approve`. Confirmed live (not
+    theoretical): triggered a real restart, checked the audit tail, `events[-1]["type"]` was
+    `"librarian"`, and the original code silently fell through to a generic "healthy" instead of
+    "recovering." Fixed to scan backward for the most recent `ask`/`approve`. Re-verified against
+    a live, spontaneously concurrent case — a watcher-triggered proposal landed while a prior
+    incident's librarian call was still running — and confirmed the fix correctly reports
+    "awaiting approval" for that genuinely-pending action rather than a false "recovering."
 
 ## Proposed, discussed, not started
 

@@ -59,8 +59,18 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
   PDF on demand (`POST /report/generate`, `GET /report/{id}/md`, `GET /report/{id}/pdf`,
   `GET /reports`) — verified: real report citing real action IDs/timestamps from this session,
   real PDF confirmed via `file` (`PDF document, version 1.7`)
-- [ ] E-9 Merge Lane C's UI work from the `Prasad` branch, test UI+backend together for real —
-  in progress
+- [x] E-9 Merged Lane C's UI work from the `Prasad` branch (modular multi-page Streamlit: landing
+  page + `/main` console, `theme.py`, `api.py`, `components/`, `views/`, plus `docs/SRS-PRD.md`).
+  Clean auto-merge on every file, including `ui/Dockerfile` (both sides' changes were on
+  non-overlapping lines — kept the new `COPY` list for `components/`/`views/` *and* the
+  BuildKit cache-mount speedup). Verified real, not just merged: rebuilt and ran the actual UI
+  container, confirmed both routes serve real 200s, found and fixed one real integration bug
+  from the branch-timing gap — `vitals_status()` checked only `events[-1]`, but the backend now
+  appends `librarian`/`report_generated` events after `approve`, so a real post-restart state
+  could read as generic "healthy" instead of "recovering." Fixed to scan backward for the most
+  recent `ask`/`approve`; re-verified live against a real leak → approve cycle, including a case
+  where a second, watcher-triggered proposal was genuinely concurrent — confirmed the fix
+  correctly reports "awaiting approval" for that real pending state, not a false positive.
 
 ## Demo-ready gate (all must pass)
 - [x] Failure injection reliably reproduces on demand — `/leak`, `/slow`, `/crash` all tested
