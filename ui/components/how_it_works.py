@@ -5,8 +5,6 @@ approve must precede execute) — the numbering here encodes an actual
 constraint of the system, not decoration.
 """
 
-import streamlit as st
-
 _STEPS = [
     ("ask", "You ask a plain-language question about system health."),
     ("diagnose", "Claude queries Prometheus metrics and container status/logs "
@@ -18,8 +16,7 @@ _STEPS = [
 ]
 
 
-def render() -> None:
-    st.markdown('<div class="section-label">how it works</div>', unsafe_allow_html=True)
+def html() -> str:
     cards = "".join(
         f"""<div class="step-card">
         <div class="step-index">{i:02d}</div>
@@ -28,4 +25,4 @@ def render() -> None:
         </div>"""
         for i, (title, desc) in enumerate(_STEPS, start=1)
     )
-    st.markdown(f'<div class="step-row">{cards}</div>', unsafe_allow_html=True)
+    return f'<div><div class="section-label">how it works</div><div class="step-row">{cards}</div></div>'

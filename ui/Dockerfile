@@ -7,6 +7,7 @@ RUN uv pip install --system --no-cache -r requirements.txt
 
 COPY app.py theme.py api.py ./
 COPY components/ components/
+COPY views/ views/
 COPY .streamlit/ .streamlit/
 
 EXPOSE 8501

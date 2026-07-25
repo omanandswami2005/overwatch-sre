@@ -1,32 +1,19 @@
 import streamlit as st
 
 import theme
-from api import fetch_audit
-from components import audit_drawer, chat, hero, how_it_works, stack, try_it, vitals
+from views import landing_page, main_page
 
-st.set_page_config(page_title="Overwatch-SRE", page_icon="🩺", layout="centered")
+st.set_page_config(page_title="Overwatch - Your SRE Copilot", page_icon="🩺", layout="wide")
 theme.inject()
 
-if "history" not in st.session_state:
-    st.session_state.history = []
-if "pulse_tick" not in st.session_state:
-    st.session_state.pulse_tick = 0
-st.session_state.pulse_tick += 1
+landing_pg = st.Page(landing_page.render, title="Overwatch - Your SRE Copilot", url_path="", default=True)
+main_pg = st.Page(main_page.render, title="Console", url_path="main")
 
-audit_events = fetch_audit()
-status, label = vitals.vitals_status(audit_events)
-tick = st.session_state.pulse_tick
+# each view needs a reference to the other page's st.Page object for
+# st.page_link() — can't exist at import time since they're circular,
+# so wire them up here before the navigation router runs either page.
+landing_page.MAIN_PAGE = main_pg
+main_page.LANDING_PAGE = landing_pg
 
-hero.render(status, tick)
-how_it_works.render()
-stack.render()
-try_it.render()
-vitals.render_strip(status, label, tick)
-
-if audit_events is None:
-    st.error("Can't reach the backend. Check `docker compose ps` and retry.")
-
-chat.render_history(st.session_state.history)
-chat.handle_input(st.session_state.history)
-
-audit_drawer.render(audit_events)
+router = st.navigation([landing_pg, main_pg], position="hidden")
+router.run()
