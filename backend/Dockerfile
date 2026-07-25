@@ -6,6 +6,8 @@ COPY requirements.txt .
 RUN uv pip install --system --no-cache -r requirements.txt
 
 COPY app.py .
+COPY toolsets/ toolsets/
+COPY toolsets.yaml .
 
 EXPOSE 8000
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,56 @@
+services:
+  target-app:
+    build: ./target-app
+    container_name: target-app
+    ports:
+      - "8080:8080"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    privileged: true
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - target-app
+      - cadvisor
+
+  backend:
+    build: ./backend
+    container_name: backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-5}
+      - PROMETHEUS_URL=http://prometheus:9090
+      - AUDIT_LOG_PATH=/data/audit-log.jsonl
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - audit-log:/data
+    depends_on:
+      - prometheus
+
+  ui:
+    build: ./ui
+    container_name: ui
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+
+volumes:
+  audit-log:

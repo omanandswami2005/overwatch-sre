@@ -1,0 +1,12 @@
+# Enable/disable toolsets without touching code — mirrors the config-driven
+# pattern HolmesGPT used (see docs/holmes-gpt-reference.md), now over our own
+# toolsets/ modules. To add a new toolset: write a module matching the
+# Toolset protocol in backend/toolsets/base.py, register it in app.py's
+# _build_registry(), and add a line here.
+toolsets:
+  prometheus:
+    enabled: true
+  docker:
+    enabled: true
+  remediation:
+    enabled: true
