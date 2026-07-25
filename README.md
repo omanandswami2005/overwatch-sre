@@ -11,7 +11,7 @@
 3. **backend** (FastAPI, image `FROM` extended `robustadev/holmes`) — one container that: calls `holmes ask` (read-only: Docker + Prometheus toolsets) for diagnosis, runs `docker restart <container>` via docker-py *only* when told to, and appends every step to `audit-log.jsonl`. Exposes `POST /ask`, `POST /approve/{action_id}`, `GET /audit`.
 4. **ui** (Streamlit) — chat box → shows diagnosis + recommended action → Approve/Deny button → calls the backend. Pure HTTP client, owns no logic of its own.
 
-Nothing beyond these four. No auth, no multi-cluster, no K8s, no DB beyond the one log file. Full task breakdown with owners: [CHECKLIST.md](CHECKLIST.md).
+Nothing beyond these four. No auth, no multi-cluster, no K8s, no DB beyond the one log file. Full task breakdown with owners: [docs/CHECKLIST.md](docs/CHECKLIST.md). Deep-dive architecture with diagrams: [docs/architecture.md](docs/architecture.md).
 
 ## Tech stack (final)
 
@@ -71,4 +71,4 @@ Env needed: `ANTHROPIC_API_KEY` in `.env`.
 4. Click **Approve** → container restarts → confirm health recovers.
 5. Show `audit-log.jsonl` — every step logged.
 
-See [CHECKLIST.md](CHECKLIST.md) for the task breakdown and who's building what.
+See [docs/CHECKLIST.md](docs/CHECKLIST.md) for the task breakdown and who's building what, and [docs/architecture.md](docs/architecture.md) for the full system + sequence diagrams.

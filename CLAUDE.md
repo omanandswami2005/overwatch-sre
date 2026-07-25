@@ -9,9 +9,10 @@ answers questions about its health, diagnoses failures, and restarts a broken co
 only after a human clicks Approve. Built for a 6.5-hour hackathon. One chat window instead
 of four dashboards.
 
-Full narrative/architecture: [README.md](README.md). Task breakdown and lane ownership:
-[CHECKLIST.md](CHECKLIST.md). UI visual spec: [UI-DESIGN.md](UI-DESIGN.md). Read those for
-depth — this file is the orientation layer, not a replacement.
+Full narrative/architecture: [README.md](README.md). Deep-dive system + sequence diagrams:
+[docs/architecture.md](docs/architecture.md). Task breakdown and lane ownership:
+[docs/CHECKLIST.md](docs/CHECKLIST.md). UI visual spec: [docs/UI-DESIGN.md](docs/UI-DESIGN.md).
+Read those for depth — this file is the orientation layer, not a replacement.
 
 **Scope discipline:** exactly four pieces (`target-app`, `prometheus`+`cadvisor`, `backend`,
 `ui`). No auth, no multi-cluster, no Kubernetes, no database beyond one JSONL log file. Don't
@@ -51,8 +52,9 @@ gate the whole design rests on.
 | `ui/app.py` | Streamlit chat UI, pure HTTP client against the backend, no logic of its own | C |
 | `ui/.streamlit/config.toml` | Dark theme tokens matching UI-DESIGN.md | C |
 
-Lanes work in parallel and should stay out of each other's files (per CHECKLIST.md). If you're
-picking up a task, check whether it's claimed (owner line in CHECKLIST.md) before starting.
+Lanes work in parallel and should stay out of each other's files (per `docs/CHECKLIST.md`). If
+you're picking up a task, check whether it's claimed (owner line in `docs/CHECKLIST.md`) before
+starting.
 
 ## API contract (backend ↔ ui)
 
@@ -77,15 +79,15 @@ change the contract without updating both sides.
   One language on purpose — less context-switching in a 6-hour build.
 - **Claude via Anthropic API** (`ANTHROPIC_API_KEY`), not a local model — Holmes calls it
   natively. Requires `.env` with that key (not yet added to the repo — see Known gaps).
-- Commit style per CHECKLIST.md: claim a task with a one-line commit (`chore: claim A-1`)
-  before starting; commit directly to `main` unless mid-breakage.
+- Commit style per `docs/CHECKLIST.md`: claim a task with a one-line commit (`chore: claim
+  A-1`) before starting; commit directly to `main` unless mid-breakage.
 - Design tokens (colors, type, copy voice) for the UI are canonical in
-  [UI-DESIGN.md](UI-DESIGN.md) — check there before changing anything visual in `ui/app.py` or
-  `ui/.streamlit/config.toml`.
+  [docs/UI-DESIGN.md](docs/UI-DESIGN.md) — check there before changing anything visual in
+  `ui/app.py` or `ui/.streamlit/config.toml`.
 
 ## Known gaps / unverified as of last read
 
-- **No `docker-compose.yml` yet** (CHECKLIST.md task A-2, unclaimed) — needed to actually run
+- **No `docker-compose.yml` yet** (`docs/CHECKLIST.md` task A-2, unclaimed) — needed to actually run
   `docker compose up --build` as documented in README.md.
 - **No `.env` / `.env.example`** — `ANTHROPIC_API_KEY` isn't scaffolded anywhere yet.
 - `backend/app.py`'s `_ask_holmes()` invokes `python /app/holmes_cli.py ask <question>` —

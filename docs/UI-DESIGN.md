@@ -1,6 +1,6 @@
 # UI Design — Overwatch-SRE
 
-**Purpose:** the visual identity and page layout for the Streamlit UI (Lane C). In a 6.5-hour hackathon the UI is the demo — this is the thing judges actually look at, so it gets more design detail than the other docs. Read alongside [README.md](README.md) (architecture, API contract) and [CHECKLIST.md](CHECKLIST.md) (C-1/C-2/C-3 tasks this doc governs).
+**Purpose:** the visual identity and page layout for the Streamlit UI (Lane C). In a 6.5-hour hackathon the UI is the demo — this is the thing judges actually look at, so it gets more design detail than the other docs. Read alongside [README.md](../README.md) (architecture, API contract), [architecture.md](architecture.md) (system + sequence diagrams), and [CHECKLIST.md](CHECKLIST.md) (C-1/C-2/C-3 tasks this doc governs).
 
 ## Direction
 
@@ -77,4 +77,4 @@ Streamlit fights custom design less than people expect if you stay inside these 
 
 ## Where this plugs into the build
 
-Governs [CHECKLIST.md](CHECKLIST.md) tasks C-1 (skeleton + fixture), C-2 (wire to `/ask`), C-3 (wire Approve to `/approve/{action_id}`). API shape it renders against is defined in [README.md](README.md#tech-stack-final).
+Governs [CHECKLIST.md](CHECKLIST.md) tasks C-1 (skeleton + fixture), C-2 (wire to `/ask`), C-3 (wire Approve to `/approve/{action_id}`). API shape it renders against is defined in [README.md](../README.md#tech-stack-final).
