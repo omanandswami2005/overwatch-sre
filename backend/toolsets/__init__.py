@@ -3,6 +3,7 @@ from .docker_toolset import DockerToolset
 from .prometheus_toolset import PrometheusToolset
 from .registry import ToolsetRegistry
 from .remediation_toolset import RemediationToolset
+from .wiki_toolset import WikiToolset
 
 __all__ = [
     "Toolset",
@@ -10,4 +11,5 @@ __all__ = [
     "PrometheusToolset",
     "DockerToolset",
     "RemediationToolset",
+    "WikiToolset",
 ]

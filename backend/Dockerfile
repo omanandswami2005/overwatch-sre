@@ -6,6 +6,8 @@ COPY requirements.txt .
 RUN uv pip install --system --no-cache -r requirements.txt
 
 COPY app.py .
+COPY librarian.py .
+COPY notifications.py .
 COPY toolsets/ toolsets/
 COPY toolsets.yaml .
 

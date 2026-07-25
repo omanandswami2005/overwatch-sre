@@ -25,24 +25,48 @@ target-app (FastAPI: /crash /leak /slow, /metrics) ──┐
 cadvisor ──> prometheus <────────────────────────────┤
                                                        │
 backend (FastAPI, plain python:3.11-slim)
-  │  Claude tool-use loop (_run_agent in app.py) driven by a toolset registry:
-  │    toolsets/prometheus_toolset.py  → query_prometheus        (read-only)
+  │  Chat agent (_run_agent in app.py), read-only + propose, via toolset registry:
+  │    toolsets/prometheus_toolset.py  → query_prometheus          (read-only)
   │    toolsets/docker_toolset.py      → get_container_status/logs (read-only)
-  │    toolsets/remediation_toolset.py → propose_restart          (recommend only)
+  │    toolsets/wiki_toolset.py        → search_wiki/read_wiki_page (read-only)
+  │    toolsets/remediation_toolset.py → propose_restart            (recommend only)
   │  docker-py: restart <container>  (only on POST /approve)
+  │  librarian.py: isolated agent, write_wiki_pages ONLY, triggered
+  │    automatically (best-effort) after an approved restart succeeds
+  │  notifications.py: Slack webhook on proposal + on approve outcome
   │  appends every step ──> audit-log.jsonl
   ▲
-  │  POST /ask, POST /approve/{action_id}, GET /audit
+  │  POST /ask, POST /approve/{action_id}, GET /audit, GET /incidents
 ui (Streamlit) ── chat + Approve/Deny button
 ```
 
 **The one piece of custom logic in this project** is the propose → approve → execute → audit
-loop in `backend/app.py`. The agent itself only ever gets read-only tools (query Prometheus,
-read container status/logs) plus `propose_restart`, which *records* a recommendation and never
-touches the Docker daemon; the container restart is a separate code path,
-gated behind `POST /approve/{action_id}`, which only fires when a human clicks Approve in the
-UI. Never give the agent a tool that mutates state directly — that would collapse the
-human-in-the-loop gate the whole design rests on.
+loop in `backend/app.py`. The chat agent only ever gets read-only tools (query Prometheus, read
+container status/logs, search the wiki) plus `propose_restart`, which *records* a recommendation
+and never touches the Docker daemon; the container restart is a separate code path, gated behind
+`POST /approve/{action_id}`, which only fires when a human clicks Approve in the UI. Never give
+the chat agent a tool that mutates state directly — that would collapse the human-in-the-loop
+gate the whole design rests on.
+
+**Librarian agent + wiki** (`backend/librarian.py`) — a second, isolated agent that documents
+resolved incidents. After `/approve/{action_id}` successfully restarts a container, the backend
+calls `run_librarian()` (best-effort, wrapped in try/except — a librarian failure never affects
+the `/approve` response) with the incident's question/diagnosis/action/result. The librarian's
+only tool is `write_wiki_pages` — forced via `tool_choice`, one call, writes
+`wiki/index.md`, `wiki/services/<container>.md`, `wiki/incidents/<action_id>.md`. This tool is
+**not** registered anywhere in `ToolsetRegistry` — the chat agent structurally cannot write to
+the wiki, there's no config flag that could leak that capability to it. `WikiToolset`
+(read-only: `search_wiki`, `read_wiki_page`) is what the chat agent uses to consult what the
+librarian has written — always cross-checked against live data, since the wiki can be stale.
+Path safety: `_safe_wiki_path()` refuses to write outside `WIKI_DIR` — the librarian's paths
+come from LLM output, so they're untrusted input.
+
+**Slack notifications** (`backend/notifications.py`) — `notify_slack()` posts to
+`SLACK_WEBHOOK_URL` (best-effort, no-ops silently if unset — never raises). Fired on: a
+`propose_restart` in `/ask`, and the outcome of `/approve`. Deliberately backend-triggered, not
+LLM-invoked (same reasoning as the restart gate — notification timing is a deterministic policy,
+not something to hand the model discretion over) and not implemented in `ui/` — it fires
+automatically off the UI's normal `/ask`/`/approve` calls, no UI code changes needed.
 
 **Toolset framework** (`backend/toolsets/`) — a small protocol-driven plugin system, our own
 replacement for what HolmesGPT's toolset config used to provide (see
@@ -64,14 +88,16 @@ replacement for what HolmesGPT's toolset config used to provide (see
 |---|---|---|
 | `target-app/app.py` | FastAPI demo app: `/crash`, `/leak`, `/slow`, `/reset`, `/metrics` (Prometheus format) | A |
 | `prometheus/prometheus.yml` | Scrape config for target-app + cadvisor | A |
-| `backend/app.py` | FastAPI wrapper: generic tool-use loop, docker-py restart, JSONL audit log | B |
+| `backend/app.py` | FastAPI wrapper: chat agent loop, docker-py restart, JSONL audit log, `/incidents` | B |
 | `backend/toolsets/` | Protocol-driven toolset modules (`base.py`, `registry.py`, `*_toolset.py`) | B |
 | `backend/toolsets.yaml` | Enable/disable toolsets by key, no code change needed | B |
-| `backend/Dockerfile` | plain `python:3.11-slim` + fastapi/uvicorn/anthropic/docker/pyyaml via `uv` | B |
+| `backend/librarian.py` | Isolated archivist agent — only tool is `write_wiki_pages`, triggered post-approve | B |
+| `backend/notifications.py` | `notify_slack()` — best-effort, no-op if `SLACK_WEBHOOK_URL` unset | B |
+| `backend/Dockerfile` | plain `python:3.11-slim` + fastapi/uvicorn/anthropic/docker/pyyaml/requests via `uv` | B |
 | `ui/app.py` | Streamlit chat UI, pure HTTP client against the backend, no logic of its own | C |
 | `ui/.streamlit/config.toml` | Dark theme tokens matching UI-DESIGN.md | C |
-| `docker-compose.yml` | Orchestrates all 5 containers; backend gets Docker socket + `audit-log` volume | A/B |
-| `.env.example` | Template for `.env` (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`) — `.env` itself is gitignored | — |
+| `docker-compose.yml` | Orchestrates all 5 containers; backend gets Docker socket + `backend-data` volume (audit log + wiki) | A/B |
+| `.env.example` | Template for `.env` (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `SLACK_WEBHOOK_URL`) — `.env` itself is gitignored | — |
 
 Lanes work in parallel and should stay out of each other's files (per `docs/CHECKLIST.md`). If
 you're picking up a task, check whether it's claimed (owner line in `docs/CHECKLIST.md`) before
@@ -83,8 +109,12 @@ starting.
   `null` unless the agent called its `propose_restart` tool during the tool-use loop in
   `_run_agent()` (`backend/app.py`).
 - `POST /approve/{action_id}` → `{status, container, result?}` — runs `docker restart` via
-  docker-py. This is the *only* place a mutating action executes.
-- `GET /audit` → list of JSONL-logged events (`ask`, `ask_error`, `approve`), each with a `ts`.
+  docker-py. This is the *only* place a mutating action executes. On success, also
+  (best-effort) triggers the librarian and a Slack notification.
+- `GET /audit` → list of JSONL-logged events (`ask`, `ask_error`, `approve`, `librarian`,
+  `librarian_error`), each with a `ts`.
+- `GET /incidents` → audit events grouped into `{ask, approve}` pairs by `action_id` — asks
+  with no proposed action are omitted (not incidents).
 - `GET /healthz` → liveness check.
 
 UI renders strictly against this shape — see `ui/app.py`'s `fetch_audit()` / chat flow. Don't
@@ -123,7 +153,11 @@ change the contract without updating both sides.
 `docker-compose.yml` exists and has been verified end-to-end for all three failure modes
 (`/leak`, `/slow`, `/crash`): correct diagnosis in each case, `propose_restart` → `/approve` →
 container actually restarts and recovers where a restart was warranted, `/slow` correctly gets
-no restart proposal since it's self-resolving, and every event lands in the audit trail.
+no restart proposal since it's self-resolving, and every event lands in the audit trail. The
+librarian + wiki loop is also verified: after an approved restart, `wiki/index.md`,
+`wiki/services/<container>.md`, and `wiki/incidents/<action_id>.md` all get written correctly,
+and a follow-up `/ask` about the same symptom correctly cites the prior incident by ID via
+`search_wiki` before falling back to live data.
 
 `backend` bind-mounts `./backend:/app` and runs `uvicorn --reload` — editing `app.py` or
 anything in `toolsets/` takes effect immediately in the running container, no

@@ -9,10 +9,16 @@ from a normal monitoring stack.
 - [What we're actually building](#what-were-actually-building)
 - [Components](#components)
 - [The core loop: propose → approve → execute → audit](#the-core-loop-propose--approve--execute--audit)
+- [Two agents, one write boundary: the librarian + wiki](#two-agents-one-write-boundary-the-librarian--wiki)
 - [Data flow](#data-flow)
 - [Deployment topology](#deployment-topology)
 - [Design decisions](#design-decisions)
 - [Known gaps](#known-gaps)
+
+A live, judge-facing visual version of this document (system diagram, the core loop, the
+librarian/wiki boundary, the toolset plugin diagram, and an honest "built vs. integrated" +
+scalability breakdown) is published as an Artifact — ask in-session for the current link if you
+need it; it isn't tracked in the repo since it's a presentation aid, not source of truth.
 
 ## System overview
 
@@ -26,16 +32,19 @@ flowchart TB
     PROM["prometheus\nscrapes target-app + cadvisor\nevery 5s"]
 
     subgraph copilot["Copilot (single container)"]
-        AGENT["Claude tool-use loop (_run_agent)\ntools: query_prometheus,\nget_container_status/logs (read-only),\npropose_restart (recommend only)"]
-        API["FastAPI wrapper (app.py)\nPOST /ask\nPOST /approve/{action_id}\nGET /audit"]
+        AGENT["Chat agent (_run_agent)\ntools: query_prometheus,\nget_container_status/logs, search_wiki (read-only),\npropose_restart (recommend only)"]
+        API["FastAPI wrapper (app.py)\nPOST /ask\nPOST /approve/{action_id}\nGET /audit, GET /incidents"]
         DOCKERPY["docker-py\nrestart <container>"]
         AUDIT[("audit-log.jsonl\nvolume-mounted")]
+        LIB["Librarian agent\nONLY tool: write_wiki_pages"]
+        WIKI[("wiki/*.md\nvolume-mounted")]
     end
 
     UI["ui (Streamlit)\nchat + Approve/Dismiss"]
     HUMAN(("on-call human"))
     DOCKERD[["Docker daemon\n(host socket)"]]
     CLAUDE[["Claude (Anthropic API)"]]
+    SLACK[["Slack (optional)"]]
 
     TA -- "/metrics" --> PROM
     CAD -- "container stats" --> PROM
@@ -44,11 +53,15 @@ flowchart TB
     AGENT -- "reasoning + tool_use requests" --> CLAUDE
     AGENT -- "query_prometheus" --> PROM
     AGENT -- "get_container_status/logs" --> DOCKERD
+    AGENT -- "search_wiki/read_wiki_page" --> WIKI
     AGENT -- "final answer + optional propose_restart" --> API
     API -- "writes every step" --> AUDIT
     API -- "restart (only after /approve)" --> DOCKERPY
     DOCKERPY -- "docker restart" --> DOCKERD
     DOCKERD -. "restarts" .-> TA
+    API -. "on proposal + on approve outcome" .-> SLACK
+    API -. "after approved restart, best-effort" .-> LIB
+    LIB -- "write_wiki_pages" --> WIKI
 
     UI <-- "POST /ask, POST /approve, GET /audit" --> API
     HUMAN -- "asks / clicks Approve" --> UI
@@ -57,9 +70,10 @@ flowchart TB
     style observed fill:#0B0F14,stroke:#5B6672,color:#E8ECEF
 ```
 
-Five moving pieces, one direction of trust: metrics and logs flow *up* into the copilot,
-reasoning flows out as a chat answer, and the only thing that flows back *down* into the
-observed system is a restart — and only once a human has clicked Approve.
+Metrics and logs flow *up* into the copilot, reasoning flows out as a chat answer, and the only
+thing that flows back *down* into the observed system is a restart — and only once a human has
+clicked Approve. Two side channels run off the *result* of an approved restart, never off the
+diagnosis alone: a Slack notification, and the librarian agent documenting the incident (below).
 
 ## What we're actually building
 
@@ -165,6 +179,10 @@ classDiagram
         get_container_status
         get_container_logs
     }
+    class WikiToolset {
+        search_wiki
+        read_wiki_page
+    }
     class RemediationToolset {
         propose_restart (record only)
     }
@@ -174,6 +192,7 @@ classDiagram
     }
     Toolset <|.. PrometheusToolset
     Toolset <|.. DockerToolset
+    Toolset <|.. WikiToolset
     Toolset <|.. RemediationToolset
     ToolsetRegistry o-- Toolset : aggregates enabled toolsets
     ToolsetRegistry --> "_run_agent()" : schemas for tools=, dispatch on tool_use
@@ -182,11 +201,12 @@ classDiagram
 - **`Toolset`** (`toolsets/base.py`) is a `typing.Protocol`, not a base class — any object with a
   matching `name`, `read_only`, `schemas()`, and `call()` qualifies. No inheritance required,
   which keeps adding a toolset a pure "write a module" exercise.
-- **`PrometheusToolset`**, **`DockerToolset`**, **`RemediationToolset`** each own one narrow slice
-  — one HTTP client or one Docker client, a handful of tool schemas, and the logic to execute
+- **`PrometheusToolset`**, **`DockerToolset`**, **`WikiToolset`**, **`RemediationToolset`** each
+  own one narrow slice — one HTTP client, a handful of tool schemas, and the logic to execute
   them. `RemediationToolset` is the one exception to "toolsets are read-only": its `call()` never
   touches the Docker daemon, it only returns the proposal for `_run_agent()` to lift into
-  `recommended_action`.
+  `recommended_action`. `WikiToolset` is read-only over the wiki the librarian agent maintains
+  (below) — the chat agent can read it, never write it.
 - **`ToolsetRegistry`** (`toolsets/registry.py`) aggregates whichever toolsets are enabled into
   one flat `schemas` list (for the Anthropic `tools=` parameter) and one dispatch table keyed by
   tool name, so `_run_agent()` never needs to know which toolset owns which tool.
@@ -249,6 +269,67 @@ Note what never happens in this sequence: the agent's `propose_restart` tool nev
 `container.restart()` — it only writes to a Python dict (`_pending_actions`) — and nothing
 executes between the diagnosis and the human's click. If the human clicks **Dismiss** instead,
 the `action_id` simply expires unused — no code path reaches the Docker daemon.
+
+## Two agents, one write boundary: the librarian + wiki
+
+The chat agent above can read almost everything in the system, including its own incident
+history — but it holds no write tool at all. A second, isolated agent, the **librarian**
+(`backend/librarian.py`), is the only thing that can write to the wiki, and its trigger is
+deterministic, not agent-initiated: it only runs (best-effort, inside a try/except that can
+never affect the `/approve` response) right after `POST /approve/{action_id}` successfully
+restarts a container.
+
+```mermaid
+flowchart LR
+    subgraph chat["Chat agent — read-only + propose"]
+        CT["query_prometheus"]
+        CD["get_container_status / logs"]
+        CW["search_wiki / read_wiki_page"]
+        CP["propose_restart"]
+    end
+    subgraph lib["Librarian agent — isolated"]
+        LW["write_wiki_pages\n(the only tool it has)"]
+    end
+    PROM[(Prometheus)]
+    DOCKERD[["Docker daemon"]]
+    WIKI[("wiki/*.md")]
+    HUMAN(("human"))
+
+    CT --> PROM
+    CD --> DOCKERD
+    CW --> WIKI
+    CP -.->|"recorded, not executed"| PENDING["pending action"]
+    PENDING --> HUMAN
+    HUMAN -->|"POST /approve"| RESTART["container.restart()"]
+    RESTART --> DOCKERD
+    RESTART -.->|"triggers, best-effort"| LW
+    LW --> WIKI
+```
+
+The librarian gets one shot: it's called with `tool_choice` forced to `write_wiki_pages`, given
+the incident context (question, diagnosis, action, result) plus whatever `services/<container>.md`
+and `index.md` already contain, and returns the full content of every page it wants to write in
+a single tool call — no multi-round loop needed. `_safe_wiki_path()` refuses to write outside
+`WIKI_DIR`, since the paths it writes to come from LLM output and are therefore untrusted input,
+same as any other external data.
+
+Wiki structure (a self-updating runbook, not a static file):
+```
+wiki/
+  index.md                    — links to every service page + recent incidents, newest first
+  services/<container>.md     — overview + "observed failure signatures" (grows with incidents)
+  incidents/<action_id>.md    — question, diagnosis, evidence, action, outcome; links back
+```
+
+Verified: a follow-up question about a symptom that was already resolved once causes the chat
+agent to call `search_wiki`, find the prior `incidents/<action_id>.md` entry, and cite it by ID
+in its diagnosis — while still re-checking live Prometheus data rather than trusting the wiki
+alone.
+
+**Slack notifications** (`backend/notifications.py`) piggyback on the same two trigger points —
+a `propose_restart` in `/ask`, and the outcome of `/approve` — via `notify_slack()`, which no-ops
+silently if `SLACK_WEBHOOK_URL` isn't set. Like the librarian, this is backend-triggered policy,
+not something the LLM decides to do via a tool call.
 
 ## Data flow
 
@@ -351,6 +432,17 @@ Carried over from README.md's rationale, restated here for the architectural "wh
 - **JSONL flat file, not a database, for audit.** The audit trail needs to be append-only,
   human-readable, and demoable with `tail -f` — a database adds a migration story and a service
   dependency for a feature that's fundamentally "log every step."
+- **A separate librarian agent, not a `write_wiki_pages` tool on the chat agent.** The safety
+  story of this whole project rests on the chat agent never holding a mutating tool. Wiki writes
+  are lower-stakes than a container restart, but the same principle still applies: giving the
+  chat agent write access "just for docs" would be a precedent that erodes the actual guarantee.
+  A structurally separate agent with a single tool, triggered by backend code rather than by its
+  own judgment, keeps the invariant airtight instead of policy-enforced.
+- **A GitHub PR from these incident writeups was considered and deferred**, not dropped — it
+  needs a `GITHUB_TOKEN` with repo write scope (not available at the time this was built) and a
+  live network call to GitHub during a demo is one more thing that can fail. The wiki files exist
+  as plain markdown under a volume-mounted dir specifically so "open a PR with these" is a fast
+  follow whenever that token is available, not a redesign.
 - **`backend` bind-mounts source + `uvicorn --reload` in Compose, rather than rebuilding the
   image per code change.** Rebuilding on every edit during active iteration was the slow path;
   a bind mount + reload gets edit-to-running-code down to seconds. The `Dockerfile`'s own `CMD`

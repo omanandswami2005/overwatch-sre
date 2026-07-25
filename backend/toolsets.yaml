@@ -10,3 +10,5 @@ toolsets:
     enabled: true
   remediation:
     enabled: true
+  wiki:
+    enabled: true

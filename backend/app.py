@@ -10,7 +10,9 @@ import yaml
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from toolsets import DockerToolset, PrometheusToolset, RemediationToolset, ToolsetRegistry
+from librarian import WIKI_DIR, run_librarian
+from notifications import notify_slack
+from toolsets import DockerToolset, PrometheusToolset, RemediationToolset, ToolsetRegistry, WikiToolset
 
 app = FastAPI(title="overwatch-sre-backend")
 
@@ -45,6 +47,9 @@ def _build_registry() -> ToolsetRegistry:
         "prometheus": lambda: PrometheusToolset(PROMETHEUS_URL),
         "docker": lambda: DockerToolset(docker_client),
         "remediation": lambda: RemediationToolset(),
+        # read-only wiki access for the chat agent — the librarian's write_wiki_pages
+        # tool is intentionally never registered here, see librarian.py.
+        "wiki": lambda: WikiToolset(WIKI_DIR),
     }
     enabled = [factory() for key, factory in available.items() if config.get(key, {}).get("enabled", True)]
     return ToolsetRegistry(enabled)
@@ -54,10 +59,13 @@ registry = _build_registry()
 
 SYSTEM_PROMPT = (
     "You are Overwatch, an on-call SRE copilot. You investigate a small Dockerized system "
-    "using the tools available to you — Prometheus metrics and container status/logs. You "
-    "are strictly read-only: you can look at anything, but you can never restart or modify "
-    "a container yourself. If you diagnose a problem that a restart would plausibly fix, "
-    "call propose_restart to recommend it — a human decides whether to approve it. Be "
+    "using the tools available to you — Prometheus metrics, container status/logs, and a "
+    "wiki of past incidents (search_wiki / read_wiki_page) maintained by a separate "
+    "archivist agent. You are strictly read-only: you can look at anything, but you can "
+    "never restart, modify a container, or write to the wiki yourself. Check the wiki for "
+    "prior occurrences of a similar symptom, but always verify against live metrics/logs "
+    "too — the wiki can be stale. If you diagnose a problem that a restart would plausibly "
+    "fix, call propose_restart to recommend it — a human decides whether to approve it. Be "
     "concise and specific: cite the metric or log line that supports your diagnosis."
 )
 
@@ -70,6 +78,13 @@ def _audit(event: dict) -> None:
     event["ts"] = time.time()
     with AUDIT_LOG.open("a") as f:
         f.write(json.dumps(event) + "\n")
+
+
+def _read_audit() -> list[dict]:
+    if not AUDIT_LOG.exists():
+        return []
+    lines = AUDIT_LOG.read_text().splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
 
 
 def _run_agent(question: str) -> tuple[str, dict | None]:
@@ -146,6 +161,13 @@ def ask(req: AskRequest):
             "recommended_action": proposed,
         }
     )
+
+    if proposed:
+        notify_slack(
+            f":rotating_light: Overwatch proposes restarting *{proposed['container']}* — "
+            f"{proposed['reason']}\nApprove: `POST /approve/{action_id}`"
+        )
+
     return {"answer": answer, "recommended_action": proposed, "action_id": action_id}
 
 
@@ -164,15 +186,68 @@ def approve(action_id: str):
         result = {"status": "failed", "container": container_name, "error": str(exc)}
 
     _audit({"type": "approve", "action_id": action_id, "action": action, "result": result})
+
+    if result["status"] == "restarted":
+        notify_slack(f":white_check_mark: Restarted *{container_name}*. Reason: {action['reason']}")
+    else:
+        notify_slack(f":x: Restart of *{container_name}* failed: {result.get('error', 'unknown error')}")
+
+    if result["status"] == "restarted":
+        # Best-effort: the archivist agent documents the incident after the fact.
+        # A librarian failure must never affect the /approve response — the restart
+        # already happened, and that's the safety-critical part.
+        ask_event = next(
+            (e for e in _read_audit() if e.get("type") == "ask" and e.get("action_id") == action_id), None
+        )
+        try:
+            written = run_librarian(
+                {
+                    "container": container_name,
+                    "question": ask_event["question"] if ask_event else "(unknown)",
+                    "answer": ask_event["answer"] if ask_event else "(unknown)",
+                    "reason": action["reason"],
+                    "result": result,
+                    "action_id": action_id,
+                    "ts": time.time(),
+                }
+            )
+            _audit({"type": "librarian", "action_id": action_id, "wrote": written})
+        except Exception as exc:
+            _audit({"type": "librarian_error", "action_id": action_id, "error": str(exc)})
+
     return result
 
 
 @app.get("/audit")
 def audit():
-    if not AUDIT_LOG.exists():
-        return []
-    lines = AUDIT_LOG.read_text().splitlines()
-    return [json.loads(line) for line in lines if line.strip()]
+    return _read_audit()
+
+
+@app.get("/incidents")
+def incidents():
+    """Groups audit events into per-action_id incidents: the diagnosis, whether it
+    was approved, and the outcome. Asks with no proposed action (informational-only
+    questions) are omitted — they're not incidents.
+    """
+    events = _read_audit()
+    asks = {e["action_id"]: e for e in events if e.get("type") == "ask" and e.get("action_id")}
+    approves = {e["action_id"]: e for e in events if e.get("type") == "approve"}
+
+    result = [
+        {
+            "action_id": action_id,
+            "question": ask_event["question"],
+            "answer": ask_event["answer"],
+            "recommended_action": ask_event["recommended_action"],
+            "asked_at": ask_event["ts"],
+            "approved": action_id in approves,
+            "result": approves[action_id]["result"] if action_id in approves else None,
+            "resolved_at": approves[action_id]["ts"] if action_id in approves else None,
+        }
+        for action_id, ask_event in asks.items()
+    ]
+    result.sort(key=lambda i: i["asked_at"], reverse=True)
+    return result
 
 
 @app.get("/healthz")
