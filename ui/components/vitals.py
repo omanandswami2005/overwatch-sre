@@ -7,27 +7,35 @@ import streamlit as st
 STATUS_COLOR = {"healthy": "#35D0A6", "degraded": "#F5A623", "down": "#E4483C"}
 
 
-def vitals_status(events) -> tuple[str, str]:
-    """Derives status from the latest real ask/approve audit event — never a
-    client-side guess, per the UI's 'owns no business logic' rule.
+def vitals_status(events, container: str = "target-app") -> tuple[str, str]:
+    """Derives ONE container's status from the latest real ask/approve audit
+    event that actually concerns it — never a client-side guess, per the UI's
+    'owns no business logic' rule.
 
     Scans backward for the most recent ask/approve rather than trusting
     events[-1]: the backend appends librarian/report_generated events after
     approve, so the literal last event isn't always the one that carries
-    status (e.g. approve -> librarian means events[-1]["type"] == "librarian").
+    status. With two watched services now, it's also not enough to take the
+    latest ask/approve overall - an action about worker-service shouldn't
+    flip target-app's dot, so events are skipped unless their
+    recommended_action/action is actually for `container`.
     """
     if events is None:
         return "down", "backend unreachable"
     for event in reversed(events):
         event_type = event.get("type")
         if event_type == "approve":
+            action = event.get("action") or {}
+            if action.get("container") != container:
+                continue
             if event.get("result", {}).get("status") == "restarted":
                 return "healthy", "recovering"
             continue
         if event_type == "ask":
-            if event.get("recommended_action"):
+            recommended = event.get("recommended_action")
+            if recommended and recommended.get("container") == container:
                 return "degraded", "awaiting approval"
-            return "healthy", "healthy"
+            continue
     return "healthy", "healthy"
 
 
@@ -56,11 +64,11 @@ def pulse_svg(status: str, tick: int, width: int = 600, height: int = 40, points
     )
 
 
-def render_strip(status: str, label: str, tick: int) -> None:
+def render_strip(status: str, label: str, tick: int, name: str = "target-app") -> None:
     st.markdown(
         f"""<div class="vitals-row">
         <span class="vitals-dot {status}"></span>
-        <span class="vitals-name">target-app</span>
+        <span class="vitals-name">{name}</span>
         <span class="vitals-pulse">{pulse_svg(status, tick, width=300, height=22, points=36)}</span>
         <span class="vitals-label">{label}</span>
         </div>""",

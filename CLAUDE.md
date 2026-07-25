@@ -112,6 +112,7 @@ replacement for what HolmesGPT's toolset config used to provide (see
 | Path | Owns | Lane (CHECKLIST.md) |
 |---|---|---|
 | `target-app/app.py` | FastAPI demo app: `/crash`, `/leak`, `/slow`, `/reset`, `/metrics` (Prometheus format), OTel-instrumented | A |
+| `worker-service/app.py` | Second watched service — different failure signature (`/jam`, stuck-queue, not a leak) | A |
 | `prometheus/prometheus.yml` | Scrape config for target-app + cadvisor | A |
 | `backend/app.py` | FastAPI wrapper: chat agent loop, docker-py restart, JSONL audit log, `/incidents` | B |
 | `backend/toolsets/` | Protocol-driven toolset modules (`base.py`, `registry.py`, `*_toolset.py`, incl. `jaeger_toolset.py`) | B |

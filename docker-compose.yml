@@ -14,6 +14,21 @@ services:
     depends_on:
       - jaeger
 
+  worker-service:
+    build: ./worker-service
+    container_name: worker-service
+    ports:
+      - "8090:8090"
+    environment:
+      - OTEL_SERVICE_NAME=worker-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=none
+    depends_on:
+      - jaeger
+
   jaeger:
     image: jaegertracing/all-in-one:1.76.0
     container_name: jaeger
@@ -44,6 +59,7 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
       - target-app
+      - worker-service
       - cadvisor
 
   grafana:
@@ -78,13 +94,14 @@ services:
       - GRAFANA_ADMIN_USER=admin
       - GRAFANA_ADMIN_PASSWORD=admin
       - TARGET_APP_URL=http://target-app:8080
+      - WORKER_SERVICE_URL=http://worker-service:8090
       - AUDIT_LOG_PATH=/data/audit-log.jsonl
       - WIKI_DIR=/data/wiki
       - REPORTS_DIR=/data/reports
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
       - WATCH_ENABLED=${WATCH_ENABLED:-true}
       - WATCH_INTERVAL_SECONDS=${WATCH_INTERVAL_SECONDS:-30}
-      - WATCH_CONTAINERS=${WATCH_CONTAINERS:-target-app}
+      - WATCH_CONTAINERS=${WATCH_CONTAINERS:-target-app,worker-service}
       - LEAK_THRESHOLD_BYTES=${LEAK_THRESHOLD_BYTES:-50000000}
       - WATCH_COOLDOWN_SECONDS=${WATCH_COOLDOWN_SECONDS:-300}
     volumes:

@@ -29,24 +29,56 @@ def _query_instant(promql: str) -> float | None:
     return float(result[0]["value"][1]) if result else None
 
 
+# Per-service metric checks — deliberately explicit, not a generic framework.
+# Two known services, two known failure signatures; add an entry here for a
+# new service's own metric rather than reusing another service's check
+# (an earlier version queried the bare "app_leak_bytes" metric name with no
+# job filter, which happened to work with one service but would have silently
+# mislabeled a second one — every query here is scoped with job="...").
+SERVICE_METRIC_CHECKS = {
+    "target-app": [
+        {
+            "name": "leak",
+            "query": 'app_leak_bytes{job="target-app"}',
+            "trip": lambda v: v >= LEAK_THRESHOLD_BYTES,
+            "describe": lambda v: (
+                f"app_leak_bytes metric is at {v:.0f} bytes, over the "
+                f"{LEAK_THRESHOLD_BYTES}-byte watch threshold"
+            ),
+        },
+    ],
+    "worker-service": [
+        {
+            "name": "jammed",
+            "query": 'worker_jammed{job="worker-service"}',
+            "trip": lambda v: v >= 1,
+            "describe": lambda v: (
+                "worker_jammed metric is 1 (stuck) — queue processing appears halted, "
+                "items may be enqueuing without draining"
+            ),
+        },
+    ],
+}
+
+
 def check_once(docker_client, on_trigger) -> None:
     """Runs the cheap, deterministic checks. on_trigger(question) is called once
     per tripped, non-cooled-down check — kept as a callback rather than importing
     app.py directly, to avoid a circular import (app.py imports this module).
     """
     for container in WATCH_CONTAINERS:
-        leak_key = (container, "leak")
-        try:
-            leaked = _query_instant("app_leak_bytes")
-        except Exception:
-            leaked = None
-        if leaked is not None and leaked >= LEAK_THRESHOLD_BYTES and _cooldown_ok(leak_key):
-            _last_trigger[leak_key] = time.time()
-            on_trigger(
-                f"Proactive check: {container}'s app_leak_bytes metric is at {leaked:.0f} "
-                f"bytes, over the {LEAK_THRESHOLD_BYTES}-byte watch threshold. Investigate "
-                f"and recommend an action if warranted."
-            )
+        for check in SERVICE_METRIC_CHECKS.get(container, []):
+            metric_key = (container, check["name"])
+            try:
+                value = _query_instant(check["query"])
+            except Exception:
+                value = None
+            if value is not None and check["trip"](value) and _cooldown_ok(metric_key):
+                _last_trigger[metric_key] = time.time()
+                on_trigger(
+                    f"Proactive check: {container}'s {check['describe'](value)}. "
+                    f"Investigate and recommend an action if warranted."
+                )
 
         status_key = (container, "status")
         try:

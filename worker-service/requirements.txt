@@ -1,0 +1,9 @@
+fastapi==0.115.*
+uvicorn[standard]==0.32.*
+prometheus-client==0.21.*
+# unpinned deliberately - api/sdk/exporter/instrumentation must all resolve to
+# mutually compatible versions, safer to let pip pick a matching set than to
+# hand-pin each package and risk a mismatch
+opentelemetry-distro
+opentelemetry-exporter-otlp-proto-grpc
+opentelemetry-instrumentation-fastapi

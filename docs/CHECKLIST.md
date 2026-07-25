@@ -92,6 +92,18 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
   UI-only. Rebuilt, re-ran the same real click flow, confirmed the full 7-section report renders,
   both download buttons appear, and the past-reports list correctly shows all 4 real reports
   generated across this session's testing.
+- [x] E-12 Second watched service, `worker-service` — a genuinely different failure signature
+  (`worker_jammed`/`worker_queue_depth` gauges, a stuck-consumer pattern) not a copy of
+  target-app's memory leak. Wired into Prometheus scraping, OTel/Jaeger tracing, the watcher
+  (`SERVICE_METRIC_CHECKS`, per-service now instead of one shared hardcoded metric name — fixes
+  a real bug found while extending it: the old leak check queried `app_leak_bytes` with no job
+  filter, harmless with one service but would have mislabeled a second one), `/demo/trigger`,
+  `scripts/demo-trigger.sh jam`, the landing page's "try it" buttons (which previously only had
+  one, for `/leak` — crash/slow/jam are there now too), and per-container vitals on the console
+  (previously a single hardcoded "target-app" strip regardless of which container an event was
+  about). Verified fully live: real jam → real agent diagnosis (correctly cites the stuck-queue
+  log line and gauges, not a leak) → real approve → real restart → real recovery, and separately
+  the proactive watcher catching a jam with zero manual `/ask` calls.
 
 ## Demo-ready gate (all must pass)
 - [x] Failure injection reliably reproduces on demand — `/leak`, `/slow`, `/crash` all tested

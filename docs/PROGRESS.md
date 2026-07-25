@@ -97,6 +97,28 @@ in `CLAUDE.md`.
   - **Re-verified after the fix**, same real click flow: the full 7-section report renders
     correctly, both download buttons appear, and the past-reports list correctly shows all 4
     real reports accumulated across this session's testing.
+- **Second watched service, `worker-service`** (`worker-service/app.py`) — deliberately a
+  *different* failure signature from target-app's memory leak: a stuck-queue-consumer pattern
+  (`worker_jammed`/`worker_queue_depth` gauges, `/jam`/`/work`/`/reset`), so the copilot's
+  diagnostic range is demonstrated, not just its ability to watch a second copy of the same app.
+  Wired into: Prometheus scraping, OTel→Jaeger tracing, `docker-compose.yml`,
+  `scripts/demo-trigger.sh jam`, `/demo/trigger/{service}/{mode}` (generalized from a
+  target-app-only path), the landing page's "try it" buttons (previously only `/leak` — now
+  leak/crash/slow/jam), and per-container vitals on the console.
+  - **Real bug found and fixed while extending the watcher**: the original leak check queried
+    `app_leak_bytes` with no `job=` filter — harmless with one service, but would have silently
+    mislabeled worker-service (which doesn't even emit that metric) once a second container
+    entered the loop. Generalized to `SERVICE_METRIC_CHECKS`, an explicit per-service metric+
+    threshold table (not a hidden generic framework), each query properly scoped by `job=`.
+  - **Real bug found and fixed in the UI too**: `vitals_status()` derived one global status with
+    no notion of which container an event was actually about — with two services, an action on
+    worker-service could flip target-app's dot. Fixed to filter by `container` when scanning
+    backward through events.
+  - **Verified fully live, not just wired**: real `/jam` → real agent diagnosis (correctly cited
+    the stuck-consumer log line and gauges, not a leak — confirming it isn't pattern-matching on
+    "target-app" specifically) → real `/approve` → real restart → real recovery. Separately
+    verified the proactive watcher catching a jam with zero manual `/ask` calls, using the new
+    per-service check.
 - **Git/GitHub identity**: `omanandswami2005` / `omanandswami2005@gmail.com`, both `gh` and local
   git config. Real Anthropic API key was pasted into chat once — written only to gitignored
   `.env`, user was told to rotate it in the Anthropic Console regardless.

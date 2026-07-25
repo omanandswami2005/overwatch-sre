@@ -27,10 +27,11 @@ def render() -> None:
     st.session_state.pulse_tick += 1
 
     audit_events = fetch_audit()
-    status, label = vitals.vitals_status(audit_events)
 
     st.markdown('<div style="height:1.5rem"></div>', unsafe_allow_html=True)
-    vitals.render_strip(status, label, st.session_state.pulse_tick)
+    for service in ("target-app", "worker-service"):
+        status, label = vitals.vitals_status(audit_events, container=service)
+        vitals.render_strip(status, label, st.session_state.pulse_tick, name=service)
 
     if audit_events is None:
         st.error("Can't reach the backend. Check `docker compose ps` and retry.")

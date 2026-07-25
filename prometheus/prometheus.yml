@@ -7,6 +7,10 @@ scrape_configs:
     static_configs:
       - targets: ["target-app:8080"]
 
+  - job_name: worker-service
+    static_configs:
+      - targets: ["worker-service:8090"]
+
   - job_name: cadvisor
     static_configs:
       - targets: ["cadvisor:8080"]

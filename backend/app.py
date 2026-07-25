@@ -325,24 +325,33 @@ def report_get_pdf(report_id: str):
     )
 
 
-_DEMO_TRIGGER_ENDPOINTS = {"leak", "crash", "slow", "reset"}
+WORKER_SERVICE_URL = os.environ.get("WORKER_SERVICE_URL", "http://worker-service:8090")
+
+_DEMO_TRIGGER_SERVICES = {
+    "target-app": ({"leak", "crash", "slow", "reset"}, TARGET_APP_URL),
+    "worker-service": ({"jam", "reset"}, WORKER_SERVICE_URL),
+}
 
 
-@app.post("/demo/trigger/{mode}")
-def demo_trigger(mode: str):
-    """Demo convenience only - proxies to target-app's own failure-injection
+@app.post("/demo/trigger/{service}/{mode}")
+def demo_trigger(service: str, mode: str):
+    """Demo convenience only - proxies to a watched service's own failure-injection
     endpoints so a UI button (or scripts/demo-trigger.sh) doesn't need to know
-    target-app exists. Not part of the real API contract in CLAUDE.md; this is
-    purely for making live demos reliable, not a capability the agent can reach.
+    the service's internal URL. Not part of the real API contract in CLAUDE.md;
+    this is purely for making live demos reliable, not a capability the agent
+    can reach.
     """
-    if mode not in _DEMO_TRIGGER_ENDPOINTS:
-        raise HTTPException(status_code=400, detail=f"mode must be one of {_DEMO_TRIGGER_ENDPOINTS}")
+    if service not in _DEMO_TRIGGER_SERVICES:
+        raise HTTPException(status_code=400, detail=f"service must be one of {set(_DEMO_TRIGGER_SERVICES)}")
+    modes, base_url = _DEMO_TRIGGER_SERVICES[service]
+    if mode not in modes:
+        raise HTTPException(status_code=400, detail=f"mode for {service} must be one of {modes}")
     try:
-        r = requests.get(f"{TARGET_APP_URL}/{mode}", timeout=10)
+        r = requests.get(f"{base_url}/{mode}", timeout=10)
         r.raise_for_status()
         return r.json()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"target-app call failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"{service} call failed: {exc}") from exc
 
 
 @app.get("/healthz")
