@@ -10,6 +10,7 @@ from a normal monitoring stack.
 - [Components](#components)
 - [The core loop: propose → approve → execute → audit](#the-core-loop-propose--approve--execute--audit)
 - [Two agents, one write boundary: the librarian + wiki](#two-agents-one-write-boundary-the-librarian--wiki)
+- [Proactive watching: the copilot speaks first](#proactive-watching-the-copilot-speaks-first)
 - [Data flow](#data-flow)
 - [Deployment topology](#deployment-topology)
 - [Design decisions](#design-decisions)
@@ -331,6 +332,53 @@ a `propose_restart` in `/ask`, and the outcome of `/approve` — via `notify_sla
 silently if `SLACK_WEBHOOK_URL` isn't set. Like the librarian, this is backend-triggered policy,
 not something the LLM decides to do via a tool call.
 
+## Proactive watching: the copilot speaks first
+
+Without this, the whole system is purely reactive — it only investigates when a human types a
+question. That's a weaker product than the name "copilot" implies (and weaker than the UI's own
+idle-state copy already promises: *"Overwatch speaks up first if something breaks"*). A
+background thread (`backend/watcher.py`) closes that gap without burning an LLM call every few
+seconds: it runs two cheap, deterministic checks per watched container on a timer, and only
+invokes the real (expensive) LLM investigation when one of them trips.
+
+```mermaid
+flowchart LR
+    TIMER(("every WATCH_INTERVAL_SECONDS")) --> CHECK{"cheap checks\n(no LLM)"}
+    CHECK -->|"app_leak_bytes over threshold"| TRIP1["tripped"]
+    CHECK -->|"container status != running"| TRIP2["tripped"]
+    CHECK -->|"nothing tripped"| TIMER
+    TRIP1 --> COOL{"cooldown elapsed\nfor this check?"}
+    TRIP2 --> COOL
+    COOL -->|"no — skip"| TIMER
+    COOL -->|"yes"| ASK["_handle_ask(question, source='watcher')"]
+    ASK --> LOOP["same tool-use loop /ask uses"]
+    LOOP --> AUDIT[("audit-log.jsonl\nsource: watcher")]
+    LOOP -.->|"if a restart is proposed"| SLACK["Slack notification"]
+```
+
+- **Cheap first, expensive only on trip.** The 30-second poll only ever costs one Prometheus
+  query and one Docker status call — no Claude API call happens unless a threshold is actually
+  crossed. This keeps a live demo's API spend bounded regardless of how long it runs idle.
+- **Same pipeline as a typed question, by construction.** The trigger callback calls
+  `_handle_ask()` — the exact function `POST /ask` calls — so a proactive investigation gets
+  identical diagnosis, `propose_restart` handling, audit logging, and Slack notification. The
+  only difference is `source: "watcher"` in the audit event, so the incident history can
+  distinguish "the copilot noticed this" from "someone asked."
+- **Per-check cooldown, not just a poll interval.** `WATCH_COOLDOWN_SECONDS` (default 300)
+  applies per `(container, check)` pair — an ongoing, un-remediated leak doesn't spawn a fresh
+  LLM investigation and a fresh Slack ping every 30 seconds while it waits for approval.
+- **Deliberately deterministic triggers, not an LLM deciding when to look.** The two checks
+  (`app_leak_bytes` threshold, container status) are plain Python comparisons against Prometheus
+  and Docker data — cheap, predictable, and easy to reason about. The LLM only gets involved
+  once something concrete has already tripped, same principle as everywhere else in this system:
+  deterministic code decides *when* to act, the model decides *what's wrong* and *what to
+  propose*.
+
+Verified: pushed `target-app` over `LEAK_THRESHOLD_BYTES` via `/leak` with zero manual `/ask`
+calls. Within one watch interval, the copilot investigated unprompted, correctly cited the
+earlier incident already in the wiki, and proposed a restart — confirmed via `source: "watcher"`
+in the resulting audit entry.
+
 ## Data flow
 
 ```mermaid
@@ -449,10 +497,19 @@ Carried over from README.md's rationale, restated here for the architectural "wh
   stays reload-free (that's the "real" build), Compose overrides `command:` for dev. See
   [CLAUDE.md](../CLAUDE.md#running-it--and-iterating-on-the-backend-without-rebuilding) for the
   full workflow, including how the `max_tokens` truncation bug below was found this way.
+- **The watcher's checks are deterministic Python, not an LLM polling loop.** Running the full
+  agent every 30 seconds would burn API spend and latency for no benefit — the vast majority of
+  poll cycles find nothing wrong. Cheap comparisons decide *when* to escalate; the LLM is only
+  ever invoked once something concrete has already tripped.
 
 ## Known gaps
 
 Tracked in more detail in [CLAUDE.md](../CLAUDE.md#known-gaps--unverified-as-of-last-read):
+
+- The watcher's leak check is specific to `target-app`'s `app_leak_bytes` metric name — it
+  doesn't generalize to an arbitrary service without a per-service threshold config, which
+  wasn't built. Fine for a single-demo-app hackathon scope; a real "watch N heterogeneous
+  services" version would need that generalized.
 
 - No automated tests in any of the four services.
 - No CI — the end-to-end verification (leak/slow/crash → diagnose → propose → approve → restart

@@ -6,8 +6,9 @@ Context for Claude Code when working in this repo.
 
 Overwatch-SRE: an LLM copilot (a small custom Claude tool-use agent) that watches a small
 Dockerized app, answers questions about its health, diagnoses failures, and restarts a broken
-container — only after a human clicks Approve. Built for a 6.5-hour hackathon. One chat window
-instead of four dashboards.
+container — only after a human clicks Approve. It also notices problems on its own: a
+background watcher runs cheap deterministic checks and kicks off a real investigation before
+anyone asks. Built for a 6.5-hour hackathon. One chat window instead of four dashboards.
 
 Full narrative/architecture: [README.md](README.md). Deep-dive system + sequence diagrams:
 [docs/architecture.md](docs/architecture.md). Task breakdown and lane ownership:
@@ -34,6 +35,8 @@ backend (FastAPI, plain python:3.11-slim)
   │  librarian.py: isolated agent, write_wiki_pages ONLY, triggered
   │    automatically (best-effort) after an approved restart succeeds
   │  notifications.py: Slack webhook on proposal + on approve outcome
+  │  watcher.py: background thread, cheap checks every 30s, triggers
+  │    the SAME _handle_ask() path as a user question when one trips
   │  appends every step ──> audit-log.jsonl
   ▲
   │  POST /ask, POST /approve/{action_id}, GET /audit, GET /incidents
@@ -68,6 +71,20 @@ LLM-invoked (same reasoning as the restart gate — notification timing is a det
 not something to hand the model discretion over) and not implemented in `ui/` — it fires
 automatically off the UI's normal `/ask`/`/approve` calls, no UI code changes needed.
 
+**Proactive watcher** (`backend/watcher.py`) — the part that actually earns the word "copilot":
+without it, the whole system is purely reactive (only investigates when asked), which undersells
+the product. A daemon thread runs `check_once()` every `WATCH_INTERVAL_SECONDS` (default 30) per
+container in `WATCH_CONTAINERS` (default `target-app`) — two cheap, deterministic checks, no LLM
+call: `app_leak_bytes >= LEAK_THRESHOLD_BYTES` via Prometheus, and container status via
+docker-py. Only when a check trips does it call `_handle_ask(question, source="watcher")` — the
+exact same function `/ask` uses, so a proactive investigation gets the identical
+diagnosis/propose/audit/Slack/librarian pipeline as a typed question, just a different
+`source` tag in the audit log. Each `(container, check)` pair has its own
+`WATCH_COOLDOWN_SECONDS` (default 300) so an ongoing, un-remediated issue doesn't re-trigger a
+full LLM investigation every 30s. Set `WATCH_ENABLED=false` to disable. Callback-based
+(`watcher.start(docker_client, on_trigger=...)`) specifically to avoid `watcher.py` importing
+`app.py` — `app.py` imports `watcher`, not the other way around.
+
 **Toolset framework** (`backend/toolsets/`) — a small protocol-driven plugin system, our own
 replacement for what HolmesGPT's toolset config used to provide (see
 [docs/holmes-gpt-reference.md](docs/holmes-gpt-reference.md)):
@@ -93,11 +110,12 @@ replacement for what HolmesGPT's toolset config used to provide (see
 | `backend/toolsets.yaml` | Enable/disable toolsets by key, no code change needed | B |
 | `backend/librarian.py` | Isolated archivist agent — only tool is `write_wiki_pages`, triggered post-approve | B |
 | `backend/notifications.py` | `notify_slack()` — best-effort, no-op if `SLACK_WEBHOOK_URL` unset | B |
+| `backend/watcher.py` | Background thread — proactive checks, triggers `_handle_ask` on trip | B |
 | `backend/Dockerfile` | plain `python:3.11-slim` + fastapi/uvicorn/anthropic/docker/pyyaml/requests via `uv` | B |
 | `ui/app.py` | Streamlit chat UI, pure HTTP client against the backend, no logic of its own | C |
 | `ui/.streamlit/config.toml` | Dark theme tokens matching UI-DESIGN.md | C |
 | `docker-compose.yml` | Orchestrates all 5 containers; backend gets Docker socket + `backend-data` volume (audit log + wiki) | A/B |
-| `.env.example` | Template for `.env` (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `SLACK_WEBHOOK_URL`) — `.env` itself is gitignored | — |
+| `.env.example` | Template for `.env` — `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `SLACK_WEBHOOK_URL`, `WATCH_*` — `.env` itself is gitignored | — |
 
 Lanes work in parallel and should stay out of each other's files (per `docs/CHECKLIST.md`). If
 you're picking up a task, check whether it's claimed (owner line in `docs/CHECKLIST.md`) before
@@ -107,7 +125,9 @@ starting.
 
 - `POST /ask {question}` → `{answer, recommended_action, action_id}` — `recommended_action` is
   `null` unless the agent called its `propose_restart` tool during the tool-use loop in
-  `_run_agent()` (`backend/app.py`).
+  `_run_agent()` (`backend/app.py`). Audited `ask` events also carry `source`: `"user"` for this
+  route, `"watcher"` when `backend/watcher.py`'s background thread triggered it proactively —
+  the UI's HTTP contract itself is unchanged, this is audit/incident metadata only.
 - `POST /approve/{action_id}` → `{status, container, result?}` — runs `docker restart` via
   docker-py. This is the *only* place a mutating action executes. On success, also
   (best-effort) triggers the librarian and a Slack notification.
@@ -157,7 +177,11 @@ no restart proposal since it's self-resolving, and every event lands in the audi
 librarian + wiki loop is also verified: after an approved restart, `wiki/index.md`,
 `wiki/services/<container>.md`, and `wiki/incidents/<action_id>.md` all get written correctly,
 and a follow-up `/ask` about the same symptom correctly cites the prior incident by ID via
-`search_wiki` before falling back to live data.
+`search_wiki` before falling back to live data. The watcher is verified too: pushed `target-app`
+over `LEAK_THRESHOLD_BYTES` via `/leak` with zero manual `/ask` calls, and within one
+`WATCH_INTERVAL_SECONDS` cycle it investigated on its own, correctly cited the earlier incident
+from the wiki, and proposed a restart — `source: "watcher"` in the audit log confirms it, not a
+user-typed question.
 
 `backend` bind-mounts `./backend:/app` and runs `uvicorn --reload` — editing `app.py` or
 anything in `toolsets/` takes effect immediately in the running container, no

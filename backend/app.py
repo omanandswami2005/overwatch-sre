@@ -10,6 +10,7 @@ import yaml
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+import watcher
 from librarian import WIKI_DIR, run_librarian
 from notifications import notify_slack
 from toolsets import DockerToolset, PrometheusToolset, RemediationToolset, ToolsetRegistry, WikiToolset
@@ -139,13 +140,17 @@ def _run_agent(question: str) -> tuple[str, dict | None]:
     return "Investigation took too many steps — try a narrower question.", proposed_action
 
 
-@app.post("/ask")
-def ask(req: AskRequest):
+def _handle_ask(question: str, source: str = "user") -> dict:
+    """Shared by POST /ask and the background watcher, so a proactively-triggered
+    investigation gets exactly the same audit trail, pending-action registration,
+    and Slack notification as a user-typed question — the only difference is
+    `source`, so the audit log (and eventually the UI) can tell them apart.
+    """
     try:
-        answer, proposed = _run_agent(req.question)
+        answer, proposed = _run_agent(question)
     except Exception as exc:
-        _audit({"type": "ask_error", "question": req.question, "error": str(exc)})
-        raise HTTPException(status_code=502, detail=f"agent call failed: {exc}") from exc
+        _audit({"type": "ask_error", "question": question, "source": source, "error": str(exc)})
+        raise
 
     action_id = None
     if proposed:
@@ -155,7 +160,8 @@ def ask(req: AskRequest):
     _audit(
         {
             "type": "ask",
-            "question": req.question,
+            "question": question,
+            "source": source,
             "answer": answer,
             "action_id": action_id,
             "recommended_action": proposed,
@@ -163,12 +169,21 @@ def ask(req: AskRequest):
     )
 
     if proposed:
+        prefix = ":mag:" if source == "watcher" else ":rotating_light:"
         notify_slack(
-            f":rotating_light: Overwatch proposes restarting *{proposed['container']}* — "
+            f"{prefix} Overwatch proposes restarting *{proposed['container']}* — "
             f"{proposed['reason']}\nApprove: `POST /approve/{action_id}`"
         )
 
     return {"answer": answer, "recommended_action": proposed, "action_id": action_id}
+
+
+@app.post("/ask")
+def ask(req: AskRequest):
+    try:
+        return _handle_ask(req.question, source="user")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"agent call failed: {exc}") from exc
 
 
 @app.post("/approve/{action_id}")
@@ -253,3 +268,10 @@ def incidents():
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}
+
+
+# Started once, at import time — cheap deterministic checks (Prometheus/Docker,
+# no LLM) every WATCH_INTERVAL_SECONDS; a tripped check runs the same
+# _handle_ask() path a user question would, tagged source="watcher". This is
+# what makes the copilot notice a problem before anyone asks about it.
+watcher.start(docker_client, on_trigger=lambda question: _handle_ask(question, source="watcher"))
