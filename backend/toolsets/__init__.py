@@ -1,5 +1,6 @@
 from .base import Toolset
 from .docker_toolset import DockerToolset
+from .jaeger_toolset import JaegerToolset
 from .prometheus_toolset import PrometheusToolset
 from .registry import ToolsetRegistry
 from .remediation_toolset import RemediationToolset
@@ -10,6 +11,7 @@ __all__ = [
     "ToolsetRegistry",
     "PrometheusToolset",
     "DockerToolset",
+    "JaegerToolset",
     "RemediationToolset",
     "WikiToolset",
 ]

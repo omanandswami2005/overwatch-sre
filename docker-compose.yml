@@ -4,6 +4,24 @@ services:
     container_name: target-app
     ports:
       - "8080:8080"
+    environment:
+      - OTEL_SERVICE_NAME=target-app
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=none
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"   # UI + Query API
+      - "4317:4317"     # OTLP gRPC receiver
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
@@ -37,6 +55,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-5}
       - PROMETHEUS_URL=http://prometheus:9090
+      - JAEGER_QUERY_URL=http://jaeger:16686
       - AUDIT_LOG_PATH=/data/audit-log.jsonl
       - WIKI_DIR=/data/wiki
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
@@ -52,6 +71,7 @@ services:
     command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     depends_on:
       - prometheus
+      - jaeger
 
   ui:
     build: ./ui

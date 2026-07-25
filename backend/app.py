@@ -13,7 +13,7 @@ from pydantic import BaseModel
 import watcher
 from librarian import WIKI_DIR, run_librarian
 from notifications import notify_slack
-from toolsets import DockerToolset, PrometheusToolset, RemediationToolset, ToolsetRegistry, WikiToolset
+from toolsets import DockerToolset, JaegerToolset, PrometheusToolset, RemediationToolset, ToolsetRegistry, WikiToolset
 
 app = FastAPI(title="overwatch-sre-backend")
 
@@ -21,6 +21,7 @@ AUDIT_LOG = Path(os.environ.get("AUDIT_LOG_PATH", "/data/audit-log.jsonl"))
 AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
 
 PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://prometheus:9090")
+JAEGER_QUERY_URL = os.environ.get("JAEGER_QUERY_URL", "http://jaeger:16686")
 MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 TOOLSETS_CONFIG_PATH = Path(os.environ.get("TOOLSETS_CONFIG_PATH", "toolsets.yaml"))
 MAX_TOOL_ROUNDS = 6
@@ -51,6 +52,7 @@ def _build_registry() -> ToolsetRegistry:
         # read-only wiki access for the chat agent — the librarian's write_wiki_pages
         # tool is intentionally never registered here, see librarian.py.
         "wiki": lambda: WikiToolset(WIKI_DIR),
+        "jaeger": lambda: JaegerToolset(JAEGER_QUERY_URL),
     }
     enabled = [factory() for key, factory in available.items() if config.get(key, {}).get("enabled", True)]
     return ToolsetRegistry(enabled)
@@ -60,14 +62,16 @@ registry = _build_registry()
 
 SYSTEM_PROMPT = (
     "You are Overwatch, an on-call SRE copilot. You investigate a small Dockerized system "
-    "using the tools available to you — Prometheus metrics, container status/logs, and a "
-    "wiki of past incidents (search_wiki / read_wiki_page) maintained by a separate "
-    "archivist agent. You are strictly read-only: you can look at anything, but you can "
-    "never restart, modify a container, or write to the wiki yourself. Check the wiki for "
-    "prior occurrences of a similar symptom, but always verify against live metrics/logs "
-    "too — the wiki can be stale. If you diagnose a problem that a restart would plausibly "
-    "fix, call propose_restart to recommend it — a human decides whether to approve it. Be "
-    "concise and specific: cite the metric or log line that supports your diagnosis."
+    "using the tools available to you — Prometheus metrics, container status/logs, request "
+    "traces (query_traces), and a wiki of past incidents (search_wiki / read_wiki_page) "
+    "maintained by a separate archivist agent. You are strictly read-only: you can look at "
+    "anything, but you can never restart, modify a container, or write to the wiki yourself. "
+    "Check the wiki for prior occurrences of a similar symptom, but always verify against "
+    "live metrics/logs/traces too — the wiki can be stale. Use query_traces when a question "
+    "is about latency or which specific request/operation is slow, not just whether the "
+    "service is up. If you diagnose a problem that a restart would plausibly fix, call "
+    "propose_restart to recommend it — a human decides whether to approve it. Be concise "
+    "and specific: cite the metric, log line, or span that supports your diagnosis."
 )
 
 
