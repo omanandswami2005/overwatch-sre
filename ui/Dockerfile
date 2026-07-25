@@ -6,7 +6,9 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
 
-COPY app.py .
+COPY app.py theme.py api.py ./
+COPY components/ components/
+COPY views/ views/
 COPY .streamlit/ .streamlit/
 
 EXPOSE 8501

@@ -8,3 +8,6 @@ textColor = "#E8ECEF"
 [server]
 headless = true
 enableCORS = false
+
+[client]
+toolbarMode = "minimal"
