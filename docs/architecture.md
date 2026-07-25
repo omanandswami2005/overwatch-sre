@@ -131,11 +131,9 @@ A single FastAPI container, plain `python:3.11-slim` base (see
 responsibilities, deliberately kept in one file (`backend/app.py`) for a 6-hour build:
 
 - **Diagnosis** — `POST /ask` runs `_run_agent()`: a loop that calls the Anthropic Messages API
-  with the question and a fixed set of tool schemas, executes whichever tools Claude requests
-  (`query_prometheus`, `get_container_status`, `get_container_logs` — all read-only, backed by
-  `requests` against Prometheus's HTTP API and `docker-py` against the Docker daemon), feeds the
-  results back, and repeats (capped at `MAX_TOOL_ROUNDS`) until Claude returns a final text
-  answer.
+  with the question and the tool schemas exposed by the toolset registry (below), executes
+  whichever tools Claude requests, feeds the results back, and repeats (capped at
+  `MAX_TOOL_ROUNDS`) until Claude returns a final text answer.
 - **Action, gated** — if at any point during that loop Claude calls the `propose_restart` tool,
   the handler records `{container, reason}` as `proposed_action` — the tool call itself does
   nothing else. The `/ask` response then carries a `recommended_action` + a freshly minted
@@ -143,6 +141,61 @@ responsibilities, deliberately kept in one file (`backend/app.py`) for a 6-hour 
   UI after a human clicks the button — runs `docker-py`'s `container.restart()`.
 - **Audit** — every `ask`, `ask_error`, and `approve` event is appended as one JSON line to
   `audit-log.jsonl` (volume-mounted, so it survives container restarts).
+
+#### The toolset framework (`backend/toolsets/`)
+
+This is the part of the backend that's a deliberate, small-scale rebuild of the piece HolmesGPT
+used to provide — a pluggable, config-driven set of investigation capabilities — but owned
+outright instead of wrapped. It replaces what would otherwise be a single flat list of tool
+schemas with a protocol-driven module system:
+
+```mermaid
+classDiagram
+    class Toolset {
+        <<Protocol>>
+        +str name
+        +bool read_only
+        +schemas() list~dict~
+        +call(tool_name, tool_input) dict
+    }
+    class PrometheusToolset {
+        query_prometheus
+    }
+    class DockerToolset {
+        get_container_status
+        get_container_logs
+    }
+    class RemediationToolset {
+        propose_restart (record only)
+    }
+    class ToolsetRegistry {
+        +schemas
+        +call(tool_name, tool_input)
+    }
+    Toolset <|.. PrometheusToolset
+    Toolset <|.. DockerToolset
+    Toolset <|.. RemediationToolset
+    ToolsetRegistry o-- Toolset : aggregates enabled toolsets
+    ToolsetRegistry --> "_run_agent()" : schemas for tools=, dispatch on tool_use
+```
+
+- **`Toolset`** (`toolsets/base.py`) is a `typing.Protocol`, not a base class — any object with a
+  matching `name`, `read_only`, `schemas()`, and `call()` qualifies. No inheritance required,
+  which keeps adding a toolset a pure "write a module" exercise.
+- **`PrometheusToolset`**, **`DockerToolset`**, **`RemediationToolset`** each own one narrow slice
+  — one HTTP client or one Docker client, a handful of tool schemas, and the logic to execute
+  them. `RemediationToolset` is the one exception to "toolsets are read-only": its `call()` never
+  touches the Docker daemon, it only returns the proposal for `_run_agent()` to lift into
+  `recommended_action`.
+- **`ToolsetRegistry`** (`toolsets/registry.py`) aggregates whichever toolsets are enabled into
+  one flat `schemas` list (for the Anthropic `tools=` parameter) and one dispatch table keyed by
+  tool name, so `_run_agent()` never needs to know which toolset owns which tool.
+- **`toolsets.yaml`** enables/disables toolsets by key — the same "config turns capabilities on
+  and off" pattern HolmesGPT used, just over our own modules instead of its.
+- **To extend:** write a class matching the `Toolset` protocol, register a factory for it in
+  `app.py`'s `_build_registry()`, add a line to `toolsets.yaml`. `_run_agent()` and the
+  `/ask`/`/approve`/`/audit` routes never need to change — that's the whole point of the
+  indirection.
 
 ### 4. `ui` — pure HTTP client, owns no logic
 
@@ -234,8 +287,11 @@ authorize."
 
 ## Deployment topology
 
-Everything runs via `docker compose up --build` (compose file not yet added — see
-[Known gaps](#known-gaps)):
+Everything runs via `docker compose up --build`. This has been verified end-to-end: build all
+five services, hit `target-app`'s `/leak`, ask the copilot why `target-app` is unhealthy, get
+back a correct diagnosis (citing `app_leak_bytes` and the `OOM warning` log lines) with a
+`propose_restart`-sourced recommendation, call `/approve/{action_id}`, and confirm the container
+actually restarts and its leak state clears.
 
 ```mermaid
 flowchart TB
@@ -281,6 +337,11 @@ Carried over from README.md's rationale, restated here for the architectural "wh
   6-hour clock. An external agent framework (HolmesGPT) was evaluated and used earlier in the
   build; see [holmes-gpt-reference.md](holmes-gpt-reference.md) for what it offered and why it
   was dropped in favor of owning the loop directly.
+- **A `Toolset` protocol + registry, not one flat tool list.** The loop itself doesn't need this
+  — a flat list would run fine — but the point of dropping Holmes was to still get its pluggable,
+  config-driven "capabilities" model without its integration risk. `toolsets/base.py`'s
+  `Protocol` plus `toolsets.yaml` gets that back cheaply: new capabilities are additive modules,
+  not edits to `_run_agent()`.
 - **`uv`, not `pip`, everywhere.** Same install semantics across all three Python services,
   meaningfully faster on repeated container rebuilds during a time-boxed build.
 - **Claude via the Anthropic API, not a local model.** Docker Model Runner is Apple-Silicon-tuned;
@@ -295,10 +356,6 @@ Carried over from README.md's rationale, restated here for the architectural "wh
 
 Tracked in more detail in [CLAUDE.md](../CLAUDE.md#known-gaps--unverified-as-of-last-read):
 
-- No `docker-compose.yml` yet (`docs/CHECKLIST.md` task A-2) — the deployment topology above is
-  the target shape, not yet wired.
-- No `.env` / `.env.example` scaffolding `ANTHROPIC_API_KEY`.
 - No automated tests in any of the four services.
-- The exact `anthropic` SDK version pin in `backend/requirements.txt` (`>=0.39.0,<1.0.0`) hasn't
-  been confirmed against a real `pip install` — verify the tool-use API surface matches on first
-  build.
+- No CI — the end-to-end verification (leak → diagnose → propose → approve → restart → audit)
+  has been run manually once, locally; nothing re-runs it automatically on future changes.

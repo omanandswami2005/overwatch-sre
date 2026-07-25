@@ -25,8 +25,10 @@ target-app (FastAPI: /crash /leak /slow, /metrics) ──┐
 cadvisor ──> prometheus <────────────────────────────┤
                                                        │
 backend (FastAPI, plain python:3.11-slim)
-  │  Claude tool-use loop (_run_agent in app.py): query_prometheus,
-  │    get_container_status/logs (read-only), propose_restart (recommend only)
+  │  Claude tool-use loop (_run_agent in app.py) driven by a toolset registry:
+  │    toolsets/prometheus_toolset.py  → query_prometheus        (read-only)
+  │    toolsets/docker_toolset.py      → get_container_status/logs (read-only)
+  │    toolsets/remediation_toolset.py → propose_restart          (recommend only)
   │  docker-py: restart <container>  (only on POST /approve)
   │  appends every step ──> audit-log.jsonl
   ▲
@@ -42,16 +44,34 @@ gated behind `POST /approve/{action_id}`, which only fires when a human clicks A
 UI. Never give the agent a tool that mutates state directly — that would collapse the
 human-in-the-loop gate the whole design rests on.
 
+**Toolset framework** (`backend/toolsets/`) — a small protocol-driven plugin system, our own
+replacement for what HolmesGPT's toolset config used to provide (see
+[docs/holmes-gpt-reference.md](docs/holmes-gpt-reference.md)):
+- `base.py` defines `Toolset` as a `typing.Protocol` — `name`, `read_only`, `schemas()`,
+  `call(tool_name, tool_input)`. Any class matching that shape qualifies; no inheritance
+  required.
+- `registry.py`'s `ToolsetRegistry` aggregates enabled toolsets into one Claude `tools=` list
+  and dispatches `tool_use` blocks to whichever toolset owns that tool name.
+- `backend/toolsets.yaml` enables/disables toolsets by key (`prometheus`, `docker`,
+  `remediation`) without touching code.
+- **To add a capability:** write a module matching `Toolset` in `backend/toolsets/`, register
+  its factory in `app.py`'s `_build_registry()`, add it to `toolsets.yaml`. The agent loop
+  (`_run_agent`) never changes.
+
 ## Repo layout
 
 | Path | Owns | Lane (CHECKLIST.md) |
 |---|---|---|
 | `target-app/app.py` | FastAPI demo app: `/crash`, `/leak`, `/slow`, `/reset`, `/metrics` (Prometheus format) | A |
 | `prometheus/prometheus.yml` | Scrape config for target-app + cadvisor | A |
-| `backend/app.py` | FastAPI wrapper: Claude tool-use agent loop, docker-py restart, JSONL audit log | B |
-| `backend/Dockerfile` | plain `python:3.11-slim` + fastapi/uvicorn/anthropic/docker via `uv` | B |
+| `backend/app.py` | FastAPI wrapper: generic tool-use loop, docker-py restart, JSONL audit log | B |
+| `backend/toolsets/` | Protocol-driven toolset modules (`base.py`, `registry.py`, `*_toolset.py`) | B |
+| `backend/toolsets.yaml` | Enable/disable toolsets by key, no code change needed | B |
+| `backend/Dockerfile` | plain `python:3.11-slim` + fastapi/uvicorn/anthropic/docker/pyyaml via `uv` | B |
 | `ui/app.py` | Streamlit chat UI, pure HTTP client against the backend, no logic of its own | C |
 | `ui/.streamlit/config.toml` | Dark theme tokens matching UI-DESIGN.md | C |
+| `docker-compose.yml` | Orchestrates all 5 containers; backend gets Docker socket + `audit-log` volume | A/B |
+| `.env.example` | Template for `.env` (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`) — `.env` itself is gitignored | — |
 
 Lanes work in parallel and should stay out of each other's files (per `docs/CHECKLIST.md`). If
 you're picking up a task, check whether it's claimed (owner line in `docs/CHECKLIST.md`) before
@@ -78,9 +98,12 @@ change the contract without updating both sides.
 - **Python 3.11, FastAPI + Uvicorn** end-to-end for `target-app`/`backend`; Streamlit for `ui`.
   One language on purpose — less context-switching in a 6-hour build.
 - **Claude via Anthropic API** (`ANTHROPIC_API_KEY`), not a local model — called directly via
-  the `anthropic` Python SDK in `backend/app.py`. Requires `.env` with that key (not yet added
-  to the repo — see Known gaps). Model id is configurable via `ANTHROPIC_MODEL` (defaults to
-  `claude-sonnet-5`).
+  the `anthropic` Python SDK in `backend/app.py`. Copy `.env.example` to `.env` and fill in the
+  key; `.env` is gitignored, so share keys with teammates out-of-band, never via git. Model id
+  is configurable via `ANTHROPIC_MODEL` (defaults to `claude-sonnet-5`).
+- **Update docs alongside code, not after.** When a change affects architecture, the API
+  contract, or repo layout, update `CLAUDE.md`/`docs/architecture.md`/`docs/CHECKLIST.md` in the
+  same batch of edits — don't defer doc updates to a separate pass at the end.
 - Commit style per `docs/CHECKLIST.md`: claim a task with a one-line commit (`chore: claim
   A-1`) before starting; commit directly to `main` unless mid-breakage.
 - Design tokens (colors, type, copy voice) for the UI are canonical in
@@ -89,18 +112,20 @@ change the contract without updating both sides.
 
 ## Known gaps / unverified as of last read
 
-- **No `docker-compose.yml` yet** (`docs/CHECKLIST.md` task A-2, unclaimed) — needed to actually run
-  `docker compose up --build` as documented in README.md.
-- **No `.env` / `.env.example`** — `ANTHROPIC_API_KEY` isn't scaffolded anywhere yet.
 - No tests exist yet in any of the four services.
 - This project previously wrapped HolmesGPT (an external CLI/agent) instead of calling Claude
   directly; that approach was replaced with the custom tool-use agent described above. See
   [docs/holmes-gpt-reference.md](docs/holmes-gpt-reference.md) for why, kept only as a
   removable historical record — nothing in the active codebase depends on it.
 
-## Running it (once docker-compose.yml exists)
+## Running it
+
+`docker-compose.yml` exists and has been verified end-to-end (build → `/leak` → `/ask` →
+correct diagnosis + `propose_restart` → `/approve` → container actually restarts → audit trail
+shows both events).
 
 ```
+cp .env.example .env   # fill in ANTHROPIC_API_KEY
 docker compose up --build
 # target-app   :8080
 # prometheus   :9090
