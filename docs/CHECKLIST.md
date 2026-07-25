@@ -71,13 +71,18 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
   recent `ask`/`approve`; re-verified live against a real leak → approve cycle, including a case
   where a second, watcher-triggered proposal was genuinely concurrent — confirmed the fix
   correctly reports "awaiting approval" for that real pending state, not a false positive.
-- [x] E-11 Slack bot second interface (`slack-bot/app.py`) — `/overwatch` slash command over
+- [x] E-10 Slack bot second interface (`slack-bot/app.py`) — `/overwatch` slash command over
   Socket Mode, pure HTTP client of `/ask`→`/approve/{action_id}`, opt-in via
-  `docker compose --profile slack up`. Verified: real `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN`
-  confirmed valid via Slack's `auth.test`, container logs show a genuine Socket Mode session
-  established. Not yet verified: an actual `/overwatch` round-trip typed in Slack itself — see
-  `docs/PROGRESS.md`.
-- [x] E-10 Refreshed the architecture Artifact for Jaeger/Grafana/reports/the merge (old link
+  `docker compose --profile slack up`. Verified with the real tokens once they were available:
+  `docker compose --profile slack up --build slack-bot` — logs show "A new session has been
+  established" and "Bolt app is running!" (a genuine Socket Mode WebSocket to Slack, not just
+  "container didn't crash"), and `auth.test` against the real `SLACK_BOT_TOKEN` returned
+  `ok: true` for a real bot identity (`sreagent` in the connected workspace). **Not verified,
+  and deliberately not attempted**: an actual `/overwatch` round-trip typed in Slack itself —
+  that requires a human in the real workspace to type it; posting a test message myself would be
+  an unprompted visible action in what looks like a real team workspace, not a throwaway. That
+  one's yours to try.
+- [x] E-11 Refreshed the architecture Artifact for Jaeger/Grafana/reports/the merge (old link
   died mid-session — new URL, see `docs/PROGRESS.md`), and added the same briefing as an in-app
   `/docs` route (`ui/views/docs_page.py`, `ui/components/mermaid.py`) so it's always live with
   the demo. **Actually screenshotted with a real headless Chromium** (installed via
@@ -86,7 +91,7 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
   transient Streamlit "page not found" toast on a cold direct `/docs` URL paste, which clears in
   a few seconds and does **not** appear when navigating via the in-app link (the actual demo
   path) — verified both cases separately.
-- [x] E-11 Report-generation UI panel (`ui/components/reports_panel.py`, on the console) —
+- [x] E-12 Report-generation UI panel (`ui/components/reports_panel.py`, on the console) —
   context input, generate button, rendered Markdown, Download .md / Download PDF, past-reports
   list. Teammate's original spec called for a sidebar; this app's actual rebuilt layout has no
   sidebar, so it renders as a console section instead. Driven end-to-end with real Playwright
@@ -98,7 +103,7 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
   UI-only. Rebuilt, re-ran the same real click flow, confirmed the full 7-section report renders,
   both download buttons appear, and the past-reports list correctly shows all 4 real reports
   generated across this session's testing.
-- [x] E-12 Second watched service, `worker-service` — a genuinely different failure signature
+- [x] E-13 Second watched service, `worker-service` — a genuinely different failure signature
   (`worker_jammed`/`worker_queue_depth` gauges, a stuck-consumer pattern) not a copy of
   target-app's memory leak. Wired into Prometheus scraping, OTel/Jaeger tracing, the watcher
   (`SERVICE_METRIC_CHECKS`, per-service now instead of one shared hardcoded metric name — fixes
