@@ -5,7 +5,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN uv pip install --system --no-cache -r requirements.txt
 
-COPY app.py .
+COPY app.py theme.py api.py ./
+COPY components/ components/
 COPY .streamlit/ .streamlit/
 
 EXPOSE 8501
