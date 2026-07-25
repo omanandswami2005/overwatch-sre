@@ -166,23 +166,25 @@ in `CLAUDE.md`.
     a live, spontaneously concurrent case — a watcher-triggered proposal landed while a prior
     incident's librarian call was still running — and confirmed the fix correctly reports
     "awaiting approval" for that genuinely-pending action rather than a false "recovering."
+- **Slack bot — second first-class interface** (`slack-bot/app.py`, user's own design): `/overwatch
+  <question>` slash command over Socket Mode (`slack-bolt`), pure HTTP client of the same
+  `/ask`→`/approve/{action_id}` contract `ui/` uses. Separate container from `backend` on purpose
+  (failure isolation — a dropped Slack WebSocket can't affect backend/UI). Slack's 3-second ack
+  requirement is satisfied by acking immediately and running the real `_run_agent` call in a
+  background thread, delivering the result via `respond()`/`response_url`. A `propose_restart`
+  renders as Approve/Dismiss buttons in Slack. Opt-in via `docker compose --profile slack up` —
+  absent by default so it never affects anyone running the stack without Slack tokens.
+  - **Verified for real, not just built**: real `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN` were provided,
+    confirmed valid via Slack's own `auth.test` API (workspace "linkedIn", bot user `sreagent`),
+    container built and started, and the container logs show a genuine Socket Mode session
+    established (`A new session has been established`, `⚡️ Bolt app is running!`,
+    `Starting to receive messages from a new connection`) — not a hallucinated success.
+  - **Not yet verified**: an actual `/overwatch` slash command round-trip typed in the real Slack
+    workspace — needs the user to either register the slash command in the Slack App config
+    (api.slack.com/apps → Slash Commands) if not already done, and then actually type
+    `/overwatch <question>` in Slack. Confirm this before relying on it for a demo.
 
 ## Proposed, discussed, not started
-
-- **Slack bot as a second first-class interface** (user's own design, not mine) — a separate
-  `slack-bot` container, pure HTTP client of the existing `/ask` → `/approve/{id}` → `/audit`
-  contract, same role as `ui/` today. User's reasoning (sound, worth keeping if this gets built):
-  Socket Mode over Events API (no public URL/tunnel needed in Compose), a **separate** container
-  rather than in-process in `backend` (failure isolation — a dropped Slack WebSocket shouldn't
-  affect the backend or UI), async + background task to satisfy Slack's 3-second ACK requirement
-  (ack immediately, run `_run_agent` in the background, deliver the real result via
-  `response_url`).
-  - **Hard blocker**: needs real Slack credentials (`SLACK_BOT_TOKEN` starting `xoxb-`,
-    `SLACK_APP_TOKEN` starting `xapp-`) from a Slack App the user creates at api.slack.com with
-    Socket Mode enabled. Cannot be built-and-verified without those — user was explicit: no fake
-    testing. If picked up: scaffold the container/code can happen without the tokens, but it is
-    **not** "done" or "tested" until run against a real Slack workspace with real tokens.
-  - New dependency: `slack-bolt` (Python SDK).
 
 - **Centralized/searchable logs (e.g. Loki)** — user flagged "we have very less logs" as a
   concern. Current state: `get_container_logs` (docker toolset) gives the agent raw container

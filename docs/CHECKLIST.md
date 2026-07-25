@@ -71,6 +71,12 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
   recent `ask`/`approve`; re-verified live against a real leak → approve cycle, including a case
   where a second, watcher-triggered proposal was genuinely concurrent — confirmed the fix
   correctly reports "awaiting approval" for that real pending state, not a false positive.
+- [x] E-11 Slack bot second interface (`slack-bot/app.py`) — `/overwatch` slash command over
+  Socket Mode, pure HTTP client of `/ask`→`/approve/{action_id}`, opt-in via
+  `docker compose --profile slack up`. Verified: real `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN`
+  confirmed valid via Slack's `auth.test`, container logs show a genuine Socket Mode session
+  established. Not yet verified: an actual `/overwatch` round-trip typed in Slack itself — see
+  `docs/PROGRESS.md`.
 - [x] E-10 Refreshed the architecture Artifact for Jaeger/Grafana/reports/the merge (old link
   died mid-session — new URL, see `docs/PROGRESS.md`), and added the same briefing as an in-app
   `/docs` route (`ui/views/docs_page.py`, `ui/components/mermaid.py`) so it's always live with

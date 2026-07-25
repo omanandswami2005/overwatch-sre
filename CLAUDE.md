@@ -79,6 +79,19 @@ LLM-invoked (same reasoning as the restart gate — notification timing is a det
 not something to hand the model discretion over) and not implemented in `ui/` — it fires
 automatically off the UI's normal `/ask`/`/approve` calls, no UI code changes needed.
 
+**Slack bot** (`slack-bot/app.py`) — a second first-class interface, not just a notification:
+`/overwatch <question>` in Slack, backed by Socket Mode (no public URL/tunnel needed in Compose)
+via `slack-bolt`. A separate container from `backend` on purpose — failure isolation, a dropped
+Slack WebSocket can't affect the backend or `ui/`. It is a pure HTTP client of the same
+`/ask`→`/approve/{action_id}` contract `ui/` uses, nothing more — same reasoning as `ui/` itself
+having no logic of its own. Slack requires a 3-second ack on slash commands, so the real
+`_run_agent` call (which can take tens of seconds) runs in a background thread; the result is
+delivered via `respond()` (Slack's `response_url` under the hood). A `propose_restart` renders as
+Approve/Dismiss buttons in Slack itself. Opt-in: only starts with
+`docker compose --profile slack up` and needs `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN` from a Slack
+App created at api.slack.com with Socket Mode enabled — silently absent otherwise, no impact on
+the default `docker compose up` path.
+
 **Proactive watcher** (`backend/watcher.py`) — the part that actually earns the word "copilot":
 without it, the whole system is purely reactive (only investigates when asked), which undersells
 the product. A daemon thread runs `check_once()` every `WATCH_INTERVAL_SECONDS` (default 30) per
@@ -127,8 +140,9 @@ replacement for what HolmesGPT's toolset config used to provide (see
 | `ui/api.py` | The only module in `ui/` that talks to the network — thin HTTP client against the backend | C |
 | `ui/theme.py`, `ui/components/`, `ui/views/` | Modular Streamlit UI: reusable components + per-route views (`/`, `/main`, `/docs`) | C |
 | `ui/.streamlit/config.toml` | Dark theme tokens matching UI-DESIGN.md | C |
-| `docker-compose.yml` | Orchestrates all 7 containers; backend gets Docker socket + `backend-data` volume (audit log + wiki + reports) | A/B |
-| `.env.example` | Template for `.env` — `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `HAIKU_MODEL`, `SLACK_WEBHOOK_URL`, `WATCH_*` — `.env` itself is gitignored | — |
+| `slack-bot/app.py` | Second first-class interface: `/overwatch` slash command (Socket Mode), pure HTTP client of the same `/ask`→`/approve/{id}` contract `ui/` uses. Opt-in via `docker compose --profile slack up` | — |
+| `docker-compose.yml` | Orchestrates 8 containers (7 by default + `slack-bot` behind the `slack` profile); backend gets Docker socket + `backend-data` volume (audit log + wiki + reports) | A/B |
+| `.env.example` | Template for `.env` — `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `HAIKU_MODEL`, `SLACK_WEBHOOK_URL`, `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN`, `WATCH_*` — `.env` itself is gitignored | — |
 
 Lanes work in parallel and should stay out of each other's files (per `docs/CHECKLIST.md`). If
 you're picking up a task, check whether it's claimed (owner line in `docs/CHECKLIST.md`) before
