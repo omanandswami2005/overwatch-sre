@@ -1,0 +1,16 @@
+# Mounted/copied to /root/.holmes/config.yaml inside the backend container.
+# Keeps Holmes read-only: only the docker + prometheus toolsets are enabled,
+# no write/mutating toolsets. The restart action is our own code in app.py,
+# gated behind POST /approve — Holmes never executes it directly.
+#
+# NOTE: verify these exact keys against the installed version's schema
+# (`python /app/holmes_cli.py toolset --help` or docs.robusta.dev) on first
+# build — not fully confirmed ahead of time.
+
+toolsets:
+  docker/core:
+    enabled: true
+  prometheus/metrics:
+    enabled: true
+    config:
+      prometheus_url: "http://prometheus:9090"
