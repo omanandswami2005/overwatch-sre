@@ -4,10 +4,10 @@ Context for Claude Code when working in this repo.
 
 ## What this is
 
-Overwatch-SRE: an LLM copilot (HolmesGPT + Claude) that watches a small Dockerized app,
-answers questions about its health, diagnoses failures, and restarts a broken container —
-only after a human clicks Approve. Built for a 6.5-hour hackathon. One chat window instead
-of four dashboards.
+Overwatch-SRE: an LLM copilot (a small custom Claude tool-use agent) that watches a small
+Dockerized app, answers questions about its health, diagnoses failures, and restarts a broken
+container — only after a human clicks Approve. Built for a 6.5-hour hackathon. One chat window
+instead of four dashboards.
 
 Full narrative/architecture: [README.md](README.md). Deep-dive system + sequence diagrams:
 [docs/architecture.md](docs/architecture.md). Task breakdown and lane ownership:
@@ -24,8 +24,9 @@ add scope beyond what CHECKLIST.md lists — this is a time-boxed hackathon buil
 target-app (FastAPI: /crash /leak /slow, /metrics) ──┐
 cadvisor ──> prometheus <────────────────────────────┤
                                                        │
-backend (FastAPI, image FROM robustadev/holmes+docker-cli)
-  │  subprocess: holmes ask  (read-only: docker + prometheus toolsets, Claude via API)
+backend (FastAPI, plain python:3.11-slim)
+  │  Claude tool-use loop (_run_agent in app.py): query_prometheus,
+  │    get_container_status/logs (read-only), propose_restart (recommend only)
   │  docker-py: restart <container>  (only on POST /approve)
   │  appends every step ──> audit-log.jsonl
   ▲
@@ -34,11 +35,12 @@ ui (Streamlit) ── chat + Approve/Deny button
 ```
 
 **The one piece of custom logic in this project** is the propose → approve → execute → audit
-loop in `backend/app.py`. Holmes itself stays strictly read-only (docker + prometheus
-toolsets only, see `backend/holmes-config.yaml`); the container restart is our own code path,
+loop in `backend/app.py`. The agent itself only ever gets read-only tools (query Prometheus,
+read container status/logs) plus `propose_restart`, which *records* a recommendation and never
+touches the Docker daemon; the container restart is a separate code path,
 gated behind `POST /approve/{action_id}`, which only fires when a human clicks Approve in the
-UI. Never give Holmes a write/mutating toolset — that would collapse the human-in-the-loop
-gate the whole design rests on.
+UI. Never give the agent a tool that mutates state directly — that would collapse the
+human-in-the-loop gate the whole design rests on.
 
 ## Repo layout
 
@@ -46,9 +48,8 @@ gate the whole design rests on.
 |---|---|---|
 | `target-app/app.py` | FastAPI demo app: `/crash`, `/leak`, `/slow`, `/reset`, `/metrics` (Prometheus format) | A |
 | `prometheus/prometheus.yml` | Scrape config for target-app + cadvisor | A |
-| `backend/app.py` | FastAPI wrapper: shells out to `holmes ask`, docker-py restart, JSONL audit log | B |
-| `backend/holmes-config.yaml` | Holmes toolset config — keeps Holmes read-only | B |
-| `backend/Dockerfile` | `FROM robustadev/holmes:0.36.0` + docker-cli + fastapi/uvicorn via `uv` | B |
+| `backend/app.py` | FastAPI wrapper: Claude tool-use agent loop, docker-py restart, JSONL audit log | B |
+| `backend/Dockerfile` | plain `python:3.11-slim` + fastapi/uvicorn/anthropic/docker via `uv` | B |
 | `ui/app.py` | Streamlit chat UI, pure HTTP client against the backend, no logic of its own | C |
 | `ui/.streamlit/config.toml` | Dark theme tokens matching UI-DESIGN.md | C |
 
@@ -59,9 +60,8 @@ starting.
 ## API contract (backend ↔ ui)
 
 - `POST /ask {question}` → `{answer, recommended_action, action_id}` — `recommended_action` is
-  `null` unless the diagnosis warrants one (currently a keyword-trigger regex in `app.py`,
-  `RESTART_TRIGGERS` — a hackathon-grade heuristic, swap for a structured Holmes response if
-  time allows).
+  `null` unless the agent called its `propose_restart` tool during the tool-use loop in
+  `_run_agent()` (`backend/app.py`).
 - `POST /approve/{action_id}` → `{status, container, result?}` — runs `docker restart` via
   docker-py. This is the *only* place a mutating action executes.
 - `GET /audit` → list of JSONL-logged events (`ask`, `ask_error`, `approve`), each with a `ts`.
@@ -77,8 +77,10 @@ change the contract without updating both sides.
   `ghcr.io/astral-sh/uv:latest`. Keep new installs consistent with this.
 - **Python 3.11, FastAPI + Uvicorn** end-to-end for `target-app`/`backend`; Streamlit for `ui`.
   One language on purpose — less context-switching in a 6-hour build.
-- **Claude via Anthropic API** (`ANTHROPIC_API_KEY`), not a local model — Holmes calls it
-  natively. Requires `.env` with that key (not yet added to the repo — see Known gaps).
+- **Claude via Anthropic API** (`ANTHROPIC_API_KEY`), not a local model — called directly via
+  the `anthropic` Python SDK in `backend/app.py`. Requires `.env` with that key (not yet added
+  to the repo — see Known gaps). Model id is configurable via `ANTHROPIC_MODEL` (defaults to
+  `claude-sonnet-5`).
 - Commit style per `docs/CHECKLIST.md`: claim a task with a one-line commit (`chore: claim
   A-1`) before starting; commit directly to `main` unless mid-breakage.
 - Design tokens (colors, type, copy voice) for the UI are canonical in
@@ -90,12 +92,11 @@ change the contract without updating both sides.
 - **No `docker-compose.yml` yet** (`docs/CHECKLIST.md` task A-2, unclaimed) — needed to actually run
   `docker compose up --build` as documented in README.md.
 - **No `.env` / `.env.example`** — `ANTHROPIC_API_KEY` isn't scaffolded anywhere yet.
-- `backend/app.py`'s `_ask_holmes()` invokes `python /app/holmes_cli.py ask <question>` —
-  flagged in-code as unverified against the actual installed Holmes CLI's `--help` output.
-  Confirm before relying on it.
-- `backend/holmes-config.yaml` keys are flagged in-code as unverified against the installed
-  Holmes version's config schema.
 - No tests exist yet in any of the four services.
+- This project previously wrapped HolmesGPT (an external CLI/agent) instead of calling Claude
+  directly; that approach was replaced with the custom tool-use agent described above. See
+  [docs/holmes-gpt-reference.md](docs/holmes-gpt-reference.md) for why, kept only as a
+  removable historical record — nothing in the active codebase depends on it.
 
 ## Running it (once docker-compose.yml exists)
 

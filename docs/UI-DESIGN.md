@@ -51,7 +51,7 @@ The subject is an on-call engineer's console — a NOC wall, a vitals monitor, a
 
 - **Header bar** — product name + a live connection dot (teal = backend reachable, red = not). Static otherwise.
 - **Vitals strip** — one row per service (just `target-app` for the demo). Signature element.
-- **Triage chat** — native chat: copilot left, user right. The **diagnosis card** appears inline as its own message when Holmes recommends an action — not a modal, stays in the conversation's timeline.
+- **Triage chat** — native chat: copilot left, user right. The **diagnosis card** appears inline as its own message when the copilot recommends an action — not a modal, stays in the conversation's timeline.
 - **Audit drawer** — collapsed by default, monospace log lines, expands on click.
 
 ## Copy (write in the interface's voice, not a person's)

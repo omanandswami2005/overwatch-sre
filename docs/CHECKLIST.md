@@ -7,7 +7,7 @@
 | Lane | Owns | Files |
 |---|---|---|
 | A | Target app + failure injection + Prometheus/cAdvisor wiring | `target-app/`, `docker-compose.yml` (metrics services) |
-| B | Backend: extended Holmes+FastAPI image, custom toolset, restart logic, audit log | `backend/Dockerfile`, `backend/app.py`, `backend/toolsets/` |
+| B | Backend: FastAPI + custom Claude tool-use agent, restart logic, audit log | `backend/Dockerfile`, `backend/app.py` |
 | C | Streamlit UI + demo polish | `ui/` |
 
 Lane B ships an HTTP API — this is the contract Lane C builds against (agree the shape now, before both start):
@@ -20,20 +20,20 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
 ## Tasks
 
 **Wave 0 — fully parallel, start now**
-- [ ] A-1 target-app skeleton (FastAPI): `/crash`, `/leak`, `/slow`, `/metrics` — _(owner: )_
-- [ ] A-2 `docker-compose.yml` skeleton with prometheus + cadvisor — _(owner: )_
-- [ ] B-1 `backend/Dockerfile`: `FROM robustadev/holmes:0.36.0` + `apk add docker-cli` + `uv pip install fastapi uvicorn` (use `uv`, not `pip`, everywhere) — _(owner: )_
-- [ ] B-2 `config.yaml`: `prometheus_url`, `ANTHROPIC_API_KEY` wired — _(owner: )_
-- [ ] C-1 Streamlit skeleton with chat box + Approve/Deny button (against the fixture API shape above) — _(owner: )_
+- [x] A-1 target-app skeleton (FastAPI): `/crash`, `/leak`, `/slow`, `/metrics` — _(owner: )_
+- [ ] A-2 `docker-compose.yml` skeleton with prometheus + cadvisor — _(owner: )_ — blocker: nothing runs end-to-end until this exists
+- [x] B-1 `backend/Dockerfile`: plain `python:3.11-slim` + `uv pip install -r requirements.txt` (use `uv`, not `pip`, everywhere) — _(owner: )_
+- [x] B-2 `ANTHROPIC_API_KEY`, `PROMETHEUS_URL`, `ANTHROPIC_MODEL` read from env in `backend/app.py` — _(owner: )_
+- [x] C-1 Streamlit skeleton with chat box + Approve/Deny button — _(owner: )_
 
 **Wave 1 — after Wave 0 contracts land**
-- [ ] A-3 confirm Prometheus scrapes target-app + container metrics — _(owner: )_
-- [ ] B-3 custom toolset YAML: recommend-only, no write tools given to Holmes — _(owner: )_
-- [ ] B-4 `POST /ask`: FastAPI route calls `holmes ask` via subprocess, parses response — _(owner: )_
-- [ ] B-5 `POST /approve/{action_id}`: docker-py `restart`, only runs on this call — _(owner: )_
-- [ ] B-6 `GET /audit` + append every question/diagnosis/approval/action to `audit-log.jsonl` — _(owner: )_
-- [ ] C-2 wire Streamlit to real backend `/ask` instead of fixture — _(owner: )_
-- [ ] C-3 wire Approve button to backend `/approve/{action_id}` — _(owner: )_
+- [ ] A-3 confirm Prometheus scrapes target-app + container metrics — _(owner: )_ — needs A-2 first
+- [x] B-3 tool schemas defined in `backend/app.py`: `query_prometheus`, `get_container_status`, `get_container_logs` (read-only) + `propose_restart` (records a recommendation only, never restarts) — _(owner: )_
+- [x] B-4 `POST /ask`: Claude tool-use loop (Anthropic Messages API, `_run_agent` in `backend/app.py`) — _(owner: )_
+- [x] B-5 `POST /approve/{action_id}`: docker-py `restart`, only runs on this call — _(owner: )_
+- [x] B-6 `GET /audit` + append every question/diagnosis/approval/action to `audit-log.jsonl` — _(owner: )_
+- [x] C-2 Streamlit wired to real backend `/ask` (no fixture) — _(owner: )_
+- [x] C-3 Approve/Dismiss buttons wired to backend `/approve/{action_id}` — _(owner: )_
 
 **Wave 2 — integration**
 - [ ] D-1 end-to-end run: trigger `/leak`, ask copilot, approve restart, confirm recovery — _(owner: )_
