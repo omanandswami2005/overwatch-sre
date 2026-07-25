@@ -16,12 +16,21 @@ import reports
 import watcher
 from librarian import WIKI_DIR, run_librarian
 from notifications import annotate_grafana, notify_slack
-from toolsets import DockerToolset, JaegerToolset, PrometheusToolset, RemediationToolset, ToolsetRegistry, WikiToolset
+from toolsets import (
+    DockerToolset,
+    JaegerToolset,
+    PrometheusToolset,
+    RemediationToolset,
+    RunbookToolset,
+    ToolsetRegistry,
+    WikiToolset,
+)
 
 app = FastAPI(title="overwatch-sre-backend")
 
 AUDIT_LOG = Path(os.environ.get("AUDIT_LOG_PATH", "/data/audit-log.jsonl"))
 AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+RUNBOOK_PATH = Path(os.environ.get("RUNBOOK_PATH", "runbook.md"))
 
 PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://prometheus:9090")
 JAEGER_QUERY_URL = os.environ.get("JAEGER_QUERY_URL", "http://jaeger:16686")
@@ -57,6 +66,7 @@ def _build_registry() -> ToolsetRegistry:
         # tool is intentionally never registered here, see librarian.py.
         "wiki": lambda: WikiToolset(WIKI_DIR),
         "jaeger": lambda: JaegerToolset(JAEGER_QUERY_URL),
+        "runbook": lambda: RunbookToolset(RUNBOOK_PATH),
     }
     enabled = [factory() for key, factory in available.items() if config.get(key, {}).get("enabled", True)]
     return ToolsetRegistry(enabled)
@@ -67,15 +77,26 @@ registry = _build_registry()
 SYSTEM_PROMPT = (
     "You are Overwatch, an on-call SRE copilot. You investigate a small Dockerized system "
     "using the tools available to you — Prometheus metrics, container status/logs, request "
-    "traces (query_traces), and a wiki of past incidents (search_wiki / read_wiki_page) "
-    "maintained by a separate archivist agent. You are strictly read-only: you can look at "
-    "anything, but you can never restart, modify a container, or write to the wiki yourself. "
-    "Check the wiki for prior occurrences of a similar symptom, but always verify against "
-    "live metrics/logs/traces too — the wiki can be stale. Use query_traces when a question "
-    "is about latency or which specific request/operation is slow, not just whether the "
-    "service is up. If you diagnose a problem that a restart would plausibly fix, call "
-    "propose_restart to recommend it — a human decides whether to approve it. Be concise "
-    "and specific: cite the metric, log line, or span that supports your diagnosis."
+    "traces (query_traces), a wiki of past incidents (search_wiki / read_wiki_page) maintained "
+    "by a separate archivist agent, and a human-authored runbook (search_runbook / "
+    "read_runbook) that codifies what this team has decided to always do for known failure "
+    "types. You are strictly read-only: you can look at anything, but you can never restart, "
+    "modify a container, or write to the wiki/runbook yourself.\n\n"
+    "Before proposing any action: (1) check search_runbook for this failure type — it may "
+    "specify a different or additional step beyond a plain restart; (2) check search_wiki for "
+    "how many times this exact failure has happened on this container recently. If this is "
+    "the 2nd+ occurrence, you MUST say so explicitly in your answer and recommend escalation "
+    "(e.g. 'this is the Nth occurrence — recommend filing a ticket / escalating to the service "
+    "owner') — do not present a recurring problem as a fresh, isolated one. Always verify "
+    "wiki/runbook guidance against live metrics/logs/traces too, since the wiki can be stale.\n\n"
+    "Use query_traces when a question is about latency or which specific request/operation is "
+    "slow, not just whether the service is up. If you diagnose a problem that a restart would "
+    "plausibly fix, call propose_restart. If instead this container was already restarted very "
+    "recently for this same problem and it clearly didn't help (check restart_count and the "
+    "wiki for a very recent prior restart of this exact container) — a crash loop — call "
+    "propose_rollback instead of proposing the same restart again, and say explicitly that a "
+    "repeat restart already failed once. Either way, a human decides whether to approve it. Be "
+    "concise and specific: cite the metric, log line, or span that supports your diagnosis."
 )
 
 
@@ -98,10 +119,10 @@ def _read_audit() -> list[dict]:
 
 def _run_agent(question: str) -> tuple[str, dict | None]:
     """Generic tool-use loop — has no idea which toolset owns which tool, it just
-    hands every tool_use block to registry.call(). propose_restart is the one
-    tool name this loop recognizes by convention, to lift its result into
-    recommended_action; it never calls docker_client.containers.restart() —
-    that only happens in POST /approve/{action_id}, after a human clicks Approve.
+    hands every tool_use block to registry.call(). propose_restart/propose_rollback
+    are the two tool names this loop recognizes by convention, to lift their result
+    into recommended_action; neither ever calls docker_client directly — that only
+    happens in POST /approve/{action_id}, after a human clicks Approve.
     """
     messages = [{"role": "user", "content": question}]
     proposed_action = None
@@ -134,9 +155,10 @@ def _run_agent(question: str) -> tuple[str, dict | None]:
             if block.type != "tool_use":
                 continue
             result = registry.call(block.name, block.input)
-            if block.name == "propose_restart" and "error" not in result:
+            if block.name in ("propose_restart", "propose_rollback") and "error" not in result:
+                action_type = "restart_container" if block.name == "propose_restart" else "rollback_container"
                 proposed_action = {
-                    "type": "restart_container",
+                    "type": action_type,
                     "container": result["container"],
                     "reason": result["reason"],
                 }
@@ -194,6 +216,52 @@ def ask(req: AskRequest):
         raise HTTPException(status_code=502, detail=f"agent call failed: {exc}") from exc
 
 
+def _execute_restart(container_name: str) -> dict:
+    try:
+        container = docker_client.containers.get(container_name)
+        container.restart(timeout=10)
+        return {"status": "restarted", "container": container_name}
+    except Exception as exc:
+        return {"status": "failed", "container": container_name, "error": str(exc)}
+
+
+def _execute_rollback(container_name: str) -> dict:
+    """Honest, deliberately conservative: this system has no image-versioning
+    infrastructure (nothing tags a ':previous' image on build), so there is
+    usually nothing real to roll back to. Checks for real, doesn't fake success.
+    Even when a previous-tagged image IS found, this does not attempt the actual
+    container swap automatically — recreating a running container with a
+    different image (preserving network/env/volumes) is real surgery that
+    deserves its own tested code path, not something to rush under time
+    pressure onto an otherwise-working, demo-critical restart flow.
+    """
+    previous_tag = f"{container_name}:previous"
+    try:
+        docker_client.images.get(previous_tag)
+    except docker.errors.ImageNotFound:
+        return {
+            "status": "no_previous_image",
+            "container": container_name,
+            "message": (
+                f"No image tagged '{previous_tag}' exists — this stack doesn't tag "
+                "previous builds, so there's nothing to roll back to yet. A restart "
+                "is the only remediation currently available."
+            ),
+        }
+    except Exception as exc:
+        return {"status": "failed", "container": container_name, "error": str(exc)}
+    return {
+        "status": "previous_image_found_not_executed",
+        "container": container_name,
+        "message": (
+            f"Found '{previous_tag}', but automated rollback execution isn't wired up yet — "
+            "swapping a running container's image safely (network/env/volumes) needs its own "
+            "tested path. Roll back manually for now: docker compose up -d --no-deps "
+            f"--force-recreate {container_name} after retagging."
+        ),
+    }
+
+
 @app.post("/approve/{action_id}")
 def approve(action_id: str):
     action = _pending_actions.pop(action_id, None)
@@ -201,18 +269,18 @@ def approve(action_id: str):
         raise HTTPException(status_code=404, detail="unknown or already-resolved action_id")
 
     container_name = action["container"]
-    try:
-        container = docker_client.containers.get(container_name)
-        container.restart(timeout=10)
-        result = {"status": "restarted", "container": container_name}
-    except Exception as exc:
-        result = {"status": "failed", "container": container_name, "error": str(exc)}
+    if action.get("type") == "rollback_container":
+        result = _execute_rollback(container_name)
+    else:
+        result = _execute_restart(container_name)
 
     _audit({"type": "approve", "action_id": action_id, "action": action, "result": result})
 
     if result["status"] == "restarted":
         notify_slack(f":white_check_mark: Restarted *{container_name}*. Reason: {action['reason']}")
         annotate_grafana(f"Restarted {container_name}: {action['reason']}", tags=["overwatch", "restart", container_name])
+    elif result["status"] in ("no_previous_image", "previous_image_found_not_executed"):
+        notify_slack(f":information_source: Rollback for *{container_name}*: {result['message']}")
     else:
         notify_slack(f":x: Restart of *{container_name}* failed: {result.get('error', 'unknown error')}")
 

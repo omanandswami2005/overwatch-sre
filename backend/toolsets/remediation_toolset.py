@@ -28,10 +28,36 @@ class RemediationToolset:
                     "required": ["container", "reason"],
                 },
             },
+            {
+                "name": "propose_rollback",
+                "description": (
+                    "Recommend rolling back a container to its previous image instead of "
+                    "just restarting it. Use this ONLY when a restart already happened "
+                    "very recently for the same problem and it didn't help (a crash "
+                    "loop) — check get_container_status's restart_count and search_wiki "
+                    "for a recent prior restart of this exact container before calling "
+                    "this. This does NOT execute anything — it only records a proposal "
+                    "that a human must approve, same as propose_restart. Note: rollback "
+                    "may not always be possible (it depends on a previous image being "
+                    "available) — that's checked and reported honestly at approval time, "
+                    "not here."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "container": {"type": "string"},
+                        "reason": {
+                            "type": "string",
+                            "description": "why a restart alone isn't enough — cite the crash-loop evidence",
+                        },
+                    },
+                    "required": ["container", "reason"],
+                },
+            },
         ]
 
     def call(self, tool_name: str, tool_input: dict) -> dict:
-        if tool_name != "propose_restart":
+        if tool_name not in ("propose_restart", "propose_rollback"):
             raise KeyError(tool_name)
         return {
             "status": "recorded — pending human approval",

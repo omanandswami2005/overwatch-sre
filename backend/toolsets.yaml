@@ -14,3 +14,5 @@ toolsets:
     enabled: true
   jaeger:
     enabled: true
+  runbook:
+    enabled: true
