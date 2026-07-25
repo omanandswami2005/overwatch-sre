@@ -74,10 +74,12 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
 - [x] E-10 Refreshed the architecture Artifact for Jaeger/Grafana/reports/the merge (old link
   died mid-session — new URL, see `docs/PROGRESS.md`), and added the same briefing as an in-app
   `/docs` route (`ui/views/docs_page.py`, `ui/components/mermaid.py`) so it's always live with
-  the demo. Verified everything checkable without a browser tool (HTTP 200, zero server errors,
-  generated HTML/JS inspected byte-for-byte, diagram syntax bracket-balanced, mermaid.js CDN
-  confirmed live) — **no real browser was available this session, so the final visual render was
-  not screenshotted**; open `/docs` yourself to confirm before a live demo.
+  the demo. **Actually screenshotted with a real headless Chromium** (installed via
+  `npx playwright install chromium` since no browser MCP tool was connected) — diagrams confirmed
+  rendering as real SVGs with correct content, not raw text. Found one real, low-risk bug: a
+  transient Streamlit "page not found" toast on a cold direct `/docs` URL paste, which clears in
+  a few seconds and does **not** appear when navigating via the in-app link (the actual demo
+  path) — verified both cases separately.
 
 ## Demo-ready gate (all must pass)
 - [x] Failure injection reliably reproduces on demand — `/leak`, `/slow`, `/crash` all tested

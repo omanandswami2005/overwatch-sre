@@ -59,15 +59,22 @@ in `CLAUDE.md`.
   (as the artifact link just did). `ui/components/mermaid.py` renders Mermaid diagrams via
   `components.html()` loading mermaid.js from a CDN (Streamlit has no native Mermaid support,
   unlike the Artifact sandbox). Linked from both the landing page and the console.
-  - **Verification honesty**: no real browser automation tool was available in this session, so
-    this could NOT be visually screenshotted/pixel-verified. What *was* verified for real: the
-    route serves HTTP 200 with zero server-side errors in the container logs, the exact HTML/JS
-    `mermaid.render()` generates was extracted and inspected byte-for-byte (clean, valid), all 6
-    embedded diagram strings pass a bracket-balance sanity check, and the mermaid.js CDN URL was
-    confirmed live and serving real JS via a direct request. The diagram *shapes* are unchanged
-    from the ones already proven rendering correctly in the Artifact. This is strong but not
-    complete evidence — open `http://localhost:8501/docs` in an actual browser to confirm the
-    final visual render before relying on it for a live demo.
+  - **Now actually screenshotted, not just structurally checked**: no browser MCP tool was
+    connected, but `npx playwright install chromium` worked (downloaded a real headless
+    Chromium), so real screenshots were taken and visually inspected. Confirmed: the hero,
+    stat chips, section headers, callouts, and comparison table all render correctly with the
+    right typography/colors; the Mermaid diagrams render as real SVG diagrams with correct
+    nodes/labels/edges (verified the full system-overview diagram and the two-agent-boundary
+    diagram in detail — not raw text, not broken).
+  - **One real bug found this way, and correctly scoped**: a Streamlit "Page not found... no
+    corresponding file in pages/ directory" toast briefly appears on a **cold, direct** URL
+    navigation to `/docs` (a known Streamlit quirk when `st.navigation()`/`st.Page` routes don't
+    match the legacy file-based `pages/` convention on first paint) — it clears once the script
+    finishes booting, a few seconds later. Explicitly re-tested navigating via the in-app
+    "Architecture" link (the way a real demo is actually driven) instead of a fresh URL paste:
+    **the toast does not appear at all** in that path. Low real risk for a live demo driven
+    through the app's own nav; only surfaces if someone bookmarks/shares the raw `/docs` URL and
+    opens it cold.
 - **Git/GitHub identity**: `omanandswami2005` / `omanandswami2005@gmail.com`, both `gh` and local
   git config. Real Anthropic API key was pasted into chat once — written only to gitignored
   `.env`, user was told to rotate it in the Anthropic Console regardless.
