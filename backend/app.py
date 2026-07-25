@@ -85,15 +85,24 @@ def _run_agent(question: str) -> tuple[str, dict | None]:
     for _ in range(MAX_TOOL_ROUNDS):
         response = anthropic_client.messages.create(
             model=MODEL,
-            max_tokens=1024,
+            max_tokens=4096,
             system=SYSTEM_PROMPT,
             tools=registry.schemas,
             messages=messages,
         )
 
+        if response.stop_reason == "max_tokens":
+            # got cut off mid-response (often mid-thinking, before any answer text
+            # was written) — don't silently return a blank/truncated answer.
+            return (
+                "The investigation response was cut off before finishing — try asking "
+                "again, ideally a narrower question.",
+                proposed_action,
+            )
+
         if response.stop_reason != "tool_use":
             text = "".join(block.text for block in response.content if block.type == "text")
-            return text, proposed_action
+            return text or "No diagnosis text was returned — try rephrasing the question.", proposed_action
 
         messages.append({"role": "assistant", "content": response.content})
         tool_results = []

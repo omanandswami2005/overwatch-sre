@@ -351,11 +351,24 @@ Carried over from README.md's rationale, restated here for the architectural "wh
 - **JSONL flat file, not a database, for audit.** The audit trail needs to be append-only,
   human-readable, and demoable with `tail -f` — a database adds a migration story and a service
   dependency for a feature that's fundamentally "log every step."
+- **`backend` bind-mounts source + `uvicorn --reload` in Compose, rather than rebuilding the
+  image per code change.** Rebuilding on every edit during active iteration was the slow path;
+  a bind mount + reload gets edit-to-running-code down to seconds. The `Dockerfile`'s own `CMD`
+  stays reload-free (that's the "real" build), Compose overrides `command:` for dev. See
+  [CLAUDE.md](../CLAUDE.md#running-it--and-iterating-on-the-backend-without-rebuilding) for the
+  full workflow, including how the `max_tokens` truncation bug below was found this way.
 
 ## Known gaps
 
 Tracked in more detail in [CLAUDE.md](../CLAUDE.md#known-gaps--unverified-as-of-last-read):
 
 - No automated tests in any of the four services.
-- No CI — the end-to-end verification (leak → diagnose → propose → approve → restart → audit)
-  has been run manually once, locally; nothing re-runs it automatically on future changes.
+- No CI — the end-to-end verification (leak/slow/crash → diagnose → propose → approve → restart
+  → audit) has been run manually, locally, for all three failure modes; nothing re-runs it
+  automatically on future changes.
+
+**Fixed during verification:** `_run_agent()`'s `max_tokens=1024` was too tight — this model's
+default "thinking" content blocks could consume the whole budget across multi-round tool calls
+before any answer text was generated, silently returning an empty `answer` on `/ask`. Raised to
+4096 and `stop_reason == "max_tokens"` / empty-text cases now return an explicit fallback
+message instead of `""`.

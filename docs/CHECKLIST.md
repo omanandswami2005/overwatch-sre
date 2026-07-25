@@ -21,13 +21,13 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
 
 **Wave 0 — fully parallel, start now**
 - [x] A-1 target-app skeleton (FastAPI): `/crash`, `/leak`, `/slow`, `/metrics` — _(owner: )_
-- [ ] A-2 `docker-compose.yml` skeleton with prometheus + cadvisor — _(owner: )_ — blocker: nothing runs end-to-end until this exists
+- [x] A-2 `docker-compose.yml` with all 5 services (prometheus + cadvisor + target-app + backend + ui) — _(owner: )_
 - [x] B-1 `backend/Dockerfile`: plain `python:3.11-slim` + `uv pip install -r requirements.txt` (use `uv`, not `pip`, everywhere) — _(owner: )_
 - [x] B-2 `ANTHROPIC_API_KEY`, `PROMETHEUS_URL`, `ANTHROPIC_MODEL` read from env in `backend/app.py` — _(owner: )_
 - [x] C-1 Streamlit skeleton with chat box + Approve/Deny button — _(owner: )_
 
 **Wave 1 — after Wave 0 contracts land**
-- [ ] A-3 confirm Prometheus scrapes target-app + container metrics — _(owner: )_ — needs A-2 first
+- [x] A-3 confirmed Prometheus scrapes target-app + cadvisor — both show `health: up` at `/api/v1/targets` — _(owner: )_
 - [x] B-3 tool schemas defined in `backend/app.py`: `query_prometheus`, `get_container_status`, `get_container_logs` (read-only) + `propose_restart` (records a recommendation only, never restarts) — _(owner: )_
 - [x] B-4 `POST /ask`: Claude tool-use loop (Anthropic Messages API, `_run_agent` in `backend/app.py`) — _(owner: )_
 - [x] B-5 `POST /approve/{action_id}`: docker-py `restart`, only runs on this call — _(owner: )_
@@ -36,11 +36,16 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
 - [x] C-3 Approve/Dismiss buttons wired to backend `/approve/{action_id}` — _(owner: )_
 
 **Wave 2 — integration**
-- [ ] D-1 end-to-end run: trigger `/leak`, ask copilot, approve restart, confirm recovery — _(owner: )_
-- [ ] D-2 rehearse demo script from README — _(owner: )_
+- [x] D-1 end-to-end run verified for all three failure modes: `/leak`, `/slow`, `/crash` —
+  ask copilot, (for `/leak`/`/crash`) approve restart, confirm recovery — _(owner: )_
+- [x] D-2 rehearsed demo script from README against `/leak` — matches step-for-step — _(owner: )_
 
 ## Demo-ready gate (all must pass)
-- [ ] Failure injection reliably reproduces on demand
-- [ ] Copilot correctly names the root cause (memory leak / crash / slowness) unprompted
-- [ ] Restart action is blocked until Approve is clicked, and works after
-- [ ] `audit-log.jsonl` shows the full trail for the demo run
+- [x] Failure injection reliably reproduces on demand — `/leak`, `/slow`, `/crash` all tested
+- [x] Copilot correctly names the root cause unprompted — memory leak (cites `app_leak_bytes` +
+  OOM log lines), injected latency (cites log line, correctly declines to recommend a restart
+  since it's self-resolving), crash (cites exit code + FATAL log line)
+- [x] Restart action is blocked until Approve is clicked, and works after — verified for both
+  the leak and crash scenarios; `/slow` correctly gets no restart proposal at all
+- [x] `audit-log.jsonl` shows the full trail for the demo run — `ask`/`approve` pairs present
+  with `ts`, question, answer, and result for each

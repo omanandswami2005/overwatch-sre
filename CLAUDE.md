@@ -118,11 +118,27 @@ change the contract without updating both sides.
   [docs/holmes-gpt-reference.md](docs/holmes-gpt-reference.md) for why, kept only as a
   removable historical record — nothing in the active codebase depends on it.
 
-## Running it
+## Running it — and iterating on the backend without rebuilding
 
-`docker-compose.yml` exists and has been verified end-to-end (build → `/leak` → `/ask` →
-correct diagnosis + `propose_restart` → `/approve` → container actually restarts → audit trail
-shows both events).
+`docker-compose.yml` exists and has been verified end-to-end for all three failure modes
+(`/leak`, `/slow`, `/crash`): correct diagnosis in each case, `propose_restart` → `/approve` →
+container actually restarts and recovers where a restart was warranted, `/slow` correctly gets
+no restart proposal since it's self-resolving, and every event lands in the audit trail.
+
+`backend` bind-mounts `./backend:/app` and runs `uvicorn --reload` — editing `app.py` or
+anything in `toolsets/` takes effect immediately in the running container, no
+`docker compose up --build` needed. Only rebuild (`docker compose up --build backend`) when
+`requirements.txt` or the `Dockerfile` itself changes. For quick one-off checks against the live
+container without even waiting on a reload, `docker compose exec backend python3 -c "..."` can
+exercise `toolsets`/`anthropic` directly (see how the `max_tokens` truncation bug below was
+found and reproduced).
+
+**Fixed:** `_run_agent()` originally called the Messages API with `max_tokens=1024`. This model
+emits "thinking" content blocks by default, which can consume the entire token budget across
+multi-round tool calls before any answer text is generated — `stop_reason` comes back as
+something other than `"tool_use"` with zero `"text"` blocks, silently producing an empty
+`answer`. Fixed by raising `max_tokens` to 4096 and explicitly handling `stop_reason ==
+"max_tokens"` and empty-text cases with a real fallback message instead of returning `""`.
 
 ```
 cp .env.example .env   # fill in ANTHROPIC_API_KEY
