@@ -51,61 +51,45 @@ in `CLAUDE.md`.
   `https://claude.ai/code/artifact/50b05efa-f530-4ef2-888a-1d2540f6891a` (private until shared
   from its own share menu). Covers system diagram, core loop, librarian/wiki split, toolset
   plugin diagram, built-vs-integrated table, modular-monolith/scaling honesty section. **Not yet
-  updated** for Jaeger/tracing or (once built) Grafana — do that before showing it to judges if
-  those land.
+  updated** for Jaeger/Grafana (both landed after this was published) — refresh before showing it
+  to judges.
 - **Git/GitHub identity**: `omanandswami2005` / `omanandswami2005@gmail.com`, both `gh` and local
   git config. Real Anthropic API key was pasted into chat once — written only to gitignored
   `.env`, user was told to rotate it in the Anthropic Console regardless.
-
-## In progress right now (this session, may be mid-edit)
-
-- **OpenTelemetry tracing → Jaeger** — code complete, **not yet rebuilt/tested**:
-  - `target-app/requirements.txt`: added `opentelemetry-distro`,
-    `opentelemetry-exporter-otlp-proto-grpc`, `opentelemetry-instrumentation-fastapi`
-    (deliberately unpinned — api/sdk/exporter/instrumentation must resolve to a mutually
-    compatible set, safer to let pip pick than hand-pin each and risk a mismatch).
-  - `target-app/Dockerfile`: `CMD` now `opentelemetry-instrument uvicorn app:app ...`.
-  - `docker-compose.yml`: added `jaeger` service (`jaegertracing/all-in-one:1.76.0`,
-    `COLLECTOR_OTLP_ENABLED=true`, ports `16686` UI/Query API + `4317` OTLP gRPC). `target-app`
-    gets `OTEL_*` env vars pointing at `http://jaeger:4317`. `backend` gets
-    `JAEGER_QUERY_URL=http://jaeger:16686`.
-  - `backend/toolsets/jaeger_toolset.py`: new `JaegerToolset`, one tool `query_traces(service,
-    lookback_minutes, limit)` — hits Jaeger's Query API `/api/traces`, returns simplified
-    trace/span summaries. Registered in `toolsets/__init__.py`, `app.py`'s `_build_registry()`,
-    and `toolsets.yaml` (`jaeger: enabled: true`).
-  - System prompt updated to mention `query_traces` and when to reach for it (latency /
-    "which specific operation is slow" questions).
-  - **NOT YET DONE**: `docker compose up --build` to actually rebuild `target-app` with the new
-    Dockerfile/requirements, confirm traces actually land in Jaeger, confirm `query_traces`
-    returns real data to the agent. Don't claim this works until that's run for real.
-
-- **Grafana dashboard** — just started, mostly not built yet:
-  - `grafana/provisioning/datasources/`, `grafana/provisioning/dashboards/`, `grafana/dashboards/`
-    directories created, **all still empty**.
-  - **STILL TO DO**:
-    1. `grafana/provisioning/datasources/datasources.yml` — Prometheus (`uid: prometheus`) +
-       Jaeger (`uid: jaeger`) datasources, both `access: proxy`, pointed at the in-network URLs.
-    2. `grafana/provisioning/dashboards/dashboards.yml` — file-provider pointing at
-       `/var/lib/grafana/dashboards`.
-    3. `grafana/dashboards/overwatch.json` — real dashboard, not a stub: panels for
-       `app_leak_bytes` (target-app metric), `container_memory_usage_bytes{name="target-app"}`
-       and CPU from cadvisor, an `up{job="target-app"}` stat. Must reference datasource by the
-       explicit `uid` set above, not an auto-generated one (common provisioning gotcha).
-    4. `docker-compose.yml`: add a `grafana` service (`grafana/grafana:13.0.2` — the `grafana-oss`
-       repo is being deprecated as of 12.4.0+, use `grafana/grafana` per current Grafana docs),
-       port `3000`, mount the two provisioning dirs read-only, `GF_AUTH_ANONYMOUS_ENABLED=true` +
-       `GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer` so judges can open `localhost:3000` with zero login
-       friction, `depends_on: prometheus, jaeger`.
-    5. **Incident annotations on the dashboard** (explicitly requested — "how is the incident
-       tracked/triggered" should be visible on the graph, not just in a JSON log): plan is to
-       `POST` to Grafana's `/api/annotations` HTTP API from the backend right when a restart
-       succeeds (same best-effort, non-blocking pattern as the librarian/Slack triggers in
-       `/approve`), using Grafana's default `admin`/`admin` basic auth over the internal Docker
-       network (`GF_SECURITY_ADMIN_USER`/`PASSWORD` set explicitly in compose for predictability).
-       **Not started** — no code written yet for this specific piece.
-  - **NOT YET VERIFIED AT ALL** — no build, no data confirmed flowing into a real dashboard yet.
-    Don't tell the user or judges this works until it's actually been loaded in a browser (or
-    curled against Grafana's API) and shown to have real data.
+- **OpenTelemetry tracing → Jaeger** — built AND verified for real (previously flagged as
+  untested; that's resolved now):
+  - `target-app` runs under `opentelemetry-instrument`, exports via OTLP gRPC to `jaeger`
+    (`jaegertracing/all-in-one:1.76.0`, `COLLECTOR_OTLP_ENABLED=true`).
+  - **Verified**: `curl http://localhost:16686/api/services` lists `target-app`; pulled real
+    traces with real span durations via `/api/traces?service=target-app`.
+  - `backend/toolsets/jaeger_toolset.py`'s `query_traces` tool **verified working through the
+    live agent** — asked "check target-app recent traces, is anything unusually slow?" and got
+    back a real answer citing actual span durations (`GET /` ~0.8-1.0ms, `GET /metrics`
+    ~1.4-1.9ms), not a hallucinated summary.
+- **Grafana dashboard** — built AND verified for real:
+  - `grafana/provisioning/datasources/datasources.yml` (Prometheus `uid: prometheus` + Jaeger
+    `uid: jaeger`), `grafana/provisioning/dashboards/dashboards.yml` (file provider), and a real
+    4-panel dashboard at `grafana/dashboards/overwatch.json` (`app_leak_bytes`, aggregate Docker
+    memory, aggregate Docker CPU, `target-app` scrape-health stat).
+  - `docker-compose.yml`: `grafana` service (`grafana/grafana:13.0.2` — `grafana-oss` is
+    deprecated as of 12.4.0+), anonymous Viewer access enabled so judges hit `localhost:3000`
+    with zero login friction.
+  - **Real platform issue found and fixed, not papered over**: cAdvisor on this Docker
+    Desktop/macOS host does not expose per-container `name`/`image`/`container_label_*` labels —
+    confirmed via raw `/metrics` inspection, only the raw cgroup `id` path is present, and
+    container IDs aren't stable across rebuilds anyway. Panels that would've silently shown "no
+    data" (`container_memory_usage_bytes{name="target-app"}`) were rewritten to aggregate across
+    all containers (`id=~"/docker/.+"`), which *is* reliably labeled and was confirmed returning
+    real numbers. This is documented as a platform limitation in the panel's own description
+    field inside the dashboard JSON, not silently worked around.
+  - **Incident annotations, verified live**: `backend/notifications.py`'s `annotate_grafana()`
+    posts to Grafana's `/api/annotations` API (admin/admin basic auth, internal network only) on
+    every successful `/approve`. Triggered a real leak → approve cycle and confirmed via
+    `GET /api/annotations?tags=overwatch` that the actual incident reason text landed as a real
+    annotation — this is the answer to "how is an incident visible on the dashboard, not just in
+    a JSON log."
+  - Every panel query and the annotation were confirmed with real data through Grafana's own API
+    (`/api/datasources/proxy/...`, `/api/annotations`), not just "the YAML looks right."
 
 ## Proposed, discussed, not started
 
@@ -155,9 +139,8 @@ in `CLAUDE.md`.
 ```
 cp .env.example .env   # ANTHROPIC_API_KEY required; SLACK_WEBHOOK_URL, WATCH_* optional
 docker compose up --build
-# target-app :8080   prometheus :9090   cadvisor :8081
-# backend    :8000   ui :8501           jaeger :16686 (once rebuilt)
-# grafana    :3000 (once the service exists in docker-compose.yml)
+# target-app :8080   prometheus :9090   cadvisor :8081   jaeger :16686
+# backend    :8000   ui :8501           grafana :3000 (admin/admin, or anonymous Viewer)
 ```
 
 `backend` reloads on code edits via the bind mount — no rebuild needed there. `target-app`

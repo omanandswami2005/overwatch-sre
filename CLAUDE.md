@@ -13,28 +13,36 @@ anyone asks. Built for a 6.5-hour hackathon. One chat window instead of four das
 Full narrative/architecture: [README.md](README.md). Deep-dive system + sequence diagrams:
 [docs/architecture.md](docs/architecture.md). Task breakdown and lane ownership:
 [docs/CHECKLIST.md](docs/CHECKLIST.md). UI visual spec: [docs/UI-DESIGN.md](docs/UI-DESIGN.md).
+**Live status — what's verified vs. in-progress vs. proposed-not-started:**
+[docs/PROGRESS.md](docs/PROGRESS.md), kept current as the fastest way to get oriented mid-build.
 Read those for depth — this file is the orientation layer, not a replacement.
 
-**Scope discipline:** exactly four pieces (`target-app`, `prometheus`+`cadvisor`, `backend`,
-`ui`). No auth, no multi-cluster, no Kubernetes, no database beyond one JSONL log file. Don't
-add scope beyond what CHECKLIST.md lists — this is a time-boxed hackathon build, not a product.
+**Scope discipline:** core pieces are `target-app`, `prometheus`+`cadvisor`, `backend`, `ui` —
+`jaeger` (tracing) and `grafana` (dashboards) were added deliberately later to close a real gap
+(the problem statement's "metrics/logs/traces," and "we need a dashboard for judges"), not scope
+creep; see `docs/PROGRESS.md` for what's verified vs. proposed. No auth, no multi-cluster, no
+Kubernetes, no database beyond one JSONL log file. This is a time-boxed hackathon build, not a
+product — check `docs/PROGRESS.md` before adding anything else.
 
 ## Architecture
 
 ```
 target-app (FastAPI: /crash /leak /slow, /metrics) ──┐
-cadvisor ──> prometheus <────────────────────────────┤
+cadvisor ──> prometheus <────────────────────────────┤──> grafana (dashboards, :3000)
+target-app --OTLP--> jaeger (traces, :16686) <────────┘
                                                        │
 backend (FastAPI, plain python:3.11-slim)
   │  Chat agent (_run_agent in app.py), read-only + propose, via toolset registry:
   │    toolsets/prometheus_toolset.py  → query_prometheus          (read-only)
   │    toolsets/docker_toolset.py      → get_container_status/logs (read-only)
+  │    toolsets/jaeger_toolset.py      → query_traces               (read-only)
   │    toolsets/wiki_toolset.py        → search_wiki/read_wiki_page (read-only)
   │    toolsets/remediation_toolset.py → propose_restart            (recommend only)
   │  docker-py: restart <container>  (only on POST /approve)
   │  librarian.py: isolated agent, write_wiki_pages ONLY, triggered
   │    automatically (best-effort) after an approved restart succeeds
-  │  notifications.py: Slack webhook on proposal + on approve outcome
+  │  notifications.py: Slack webhook + Grafana annotation, both on
+  │    proposal / approve outcome (annotation only on success)
   │  watcher.py: background thread, cheap checks every 30s, triggers
   │    the SAME _handle_ask() path as a user question when one trips
   │  appends every step ──> audit-log.jsonl
@@ -103,18 +111,19 @@ replacement for what HolmesGPT's toolset config used to provide (see
 
 | Path | Owns | Lane (CHECKLIST.md) |
 |---|---|---|
-| `target-app/app.py` | FastAPI demo app: `/crash`, `/leak`, `/slow`, `/reset`, `/metrics` (Prometheus format) | A |
+| `target-app/app.py` | FastAPI demo app: `/crash`, `/leak`, `/slow`, `/reset`, `/metrics` (Prometheus format), OTel-instrumented | A |
 | `prometheus/prometheus.yml` | Scrape config for target-app + cadvisor | A |
 | `backend/app.py` | FastAPI wrapper: chat agent loop, docker-py restart, JSONL audit log, `/incidents` | B |
-| `backend/toolsets/` | Protocol-driven toolset modules (`base.py`, `registry.py`, `*_toolset.py`) | B |
+| `backend/toolsets/` | Protocol-driven toolset modules (`base.py`, `registry.py`, `*_toolset.py`, incl. `jaeger_toolset.py`) | B |
 | `backend/toolsets.yaml` | Enable/disable toolsets by key, no code change needed | B |
 | `backend/librarian.py` | Isolated archivist agent — only tool is `write_wiki_pages`, triggered post-approve | B |
-| `backend/notifications.py` | `notify_slack()` — best-effort, no-op if `SLACK_WEBHOOK_URL` unset | B |
+| `backend/notifications.py` | `notify_slack()` + `annotate_grafana()` — both best-effort, no-op if unconfigured | B |
 | `backend/watcher.py` | Background thread — proactive checks, triggers `_handle_ask` on trip | B |
 | `backend/Dockerfile` | plain `python:3.11-slim` + fastapi/uvicorn/anthropic/docker/pyyaml/requests via `uv` | B |
+| `grafana/provisioning/`, `grafana/dashboards/overwatch.json` | Provisioned Prometheus+Jaeger datasources, one real dashboard | A |
 | `ui/app.py` | Streamlit chat UI, pure HTTP client against the backend, no logic of its own | C |
 | `ui/.streamlit/config.toml` | Dark theme tokens matching UI-DESIGN.md | C |
-| `docker-compose.yml` | Orchestrates all 5 containers; backend gets Docker socket + `backend-data` volume (audit log + wiki) | A/B |
+| `docker-compose.yml` | Orchestrates all 7 containers; backend gets Docker socket + `backend-data` volume (audit log + wiki) | A/B |
 | `.env.example` | Template for `.env` — `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `SLACK_WEBHOOK_URL`, `WATCH_*` — `.env` itself is gitignored | — |
 
 Lanes work in parallel and should stay out of each other's files (per `docs/CHECKLIST.md`). If
@@ -182,6 +191,15 @@ over `LEAK_THRESHOLD_BYTES` via `/leak` with zero manual `/ask` calls, and withi
 `WATCH_INTERVAL_SECONDS` cycle it investigated on its own, correctly cited the earlier incident
 from the wiki, and proposed a restart — `source: "watcher"` in the audit log confirms it, not a
 user-typed question.
+
+Tracing and dashboards are verified too, not just wired: `target-app` traces confirmed landing
+in Jaeger (`curl localhost:16686/api/services` lists it, real spans with real durations pulled
+back), the `query_traces` tool confirmed working through the live agent (asked a latency
+question, got real span-duration numbers back, not a hallucinated summary), and the Grafana
+dashboard's four panels plus the restart-triggered annotation all confirmed returning real data
+through Grafana's own API — see [docs/PROGRESS.md](docs/PROGRESS.md) for the exact verification
+steps, including a real cAdvisor label limitation on this host that was found and worked around
+rather than papered over.
 
 `backend` bind-mounts `./backend:/app` and runs `uvicorn --reload` — editing `app.py` or
 anything in `toolsets/` takes effect immediately in the running container, no

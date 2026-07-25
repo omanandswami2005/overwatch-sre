@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 import watcher
 from librarian import WIKI_DIR, run_librarian
-from notifications import notify_slack
+from notifications import annotate_grafana, notify_slack
 from toolsets import DockerToolset, JaegerToolset, PrometheusToolset, RemediationToolset, ToolsetRegistry, WikiToolset
 
 app = FastAPI(title="overwatch-sre-backend")
@@ -208,6 +208,7 @@ def approve(action_id: str):
 
     if result["status"] == "restarted":
         notify_slack(f":white_check_mark: Restarted *{container_name}*. Reason: {action['reason']}")
+        annotate_grafana(f"Restarted {container_name}: {action['reason']}", tags=["overwatch", "restart", container_name])
     else:
         notify_slack(f":x: Restart of *{container_name}* failed: {result.get('error', 'unknown error')}")
 

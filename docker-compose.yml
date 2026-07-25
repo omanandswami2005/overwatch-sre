@@ -46,6 +46,23 @@ services:
       - target-app
       - cadvisor
 
+  grafana:
+    image: grafana/grafana:13.0.2
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - jaeger
+
   backend:
     build: ./backend
     container_name: backend
@@ -56,6 +73,9 @@ services:
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-5}
       - PROMETHEUS_URL=http://prometheus:9090
       - JAEGER_QUERY_URL=http://jaeger:16686
+      - GRAFANA_URL=http://grafana:3000
+      - GRAFANA_ADMIN_USER=admin
+      - GRAFANA_ADMIN_PASSWORD=admin
       - AUDIT_LOG_PATH=/data/audit-log.jsonl
       - WIKI_DIR=/data/wiki
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
@@ -72,6 +92,7 @@ services:
     depends_on:
       - prometheus
       - jaeger
+      - grafana
 
   ui:
     build: ./ui
