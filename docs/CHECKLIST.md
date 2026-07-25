@@ -115,6 +115,45 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
   about). Verified fully live: real jam → real agent diagnosis (correctly cites the stuck-queue
   log line and gauges, not a leak) → real approve → real restart → real recovery, and separately
   the proactive watcher catching a jam with zero manual `/ask` calls.
+- [x] E-14 Codified runbook (`backend/runbook.md`, `RunbookToolset`) — human-authored steps per
+  failure type, distinct from the wiki (which the librarian writes *about* what happened; this
+  says what to always *do*). Verified live via `search_runbook`.
+- [x] E-15 Recurrence escalation — system prompt now requires the agent to check incident
+  history before proposing anything and explicitly flag + recommend escalation on a 2nd+
+  occurrence rather than presenting a recurring problem as fresh. Verified live: a real response
+  said "this is a recurring failure — at least the 8th documented occurrence... flagging this
+  explicitly for escalation."
+- [x] E-16 Crash-loop detection + `propose_rollback` — same record-only pattern as
+  `propose_restart`, for when a restart already happened recently and didn't help. Execution
+  (`_execute_rollback`) is deliberately conservative and honest: checks for a real
+  `<container>:previous` tagged image; reports clearly when none exists (the expected case,
+  since this stack doesn't tag previous builds) rather than faking success. Does not attempt an
+  automated container-image swap even when a tag is found — that's real surgery deserving its
+  own tested path, not something to rush under time pressure onto the working restart flow.
+- [x] E-17 Fixed a real UX gap: proposals from the watcher (or Slack, or `scripts/demo-trigger.sh`)
+  never appeared as actionable cards in the console unless the user happened to ask a question
+  themselves first — `chat.render_history` only ever read from client-side session state.
+  Fixed with `chat.sync_pending_incidents()` (pulls unapproved incidents from `GET /incidents`)
+  plus `streamlit-autorefresh` (8s) so the console updates on its own, not just on interaction.
+  Found and fixed a second real bug surfaced by this: `_pending_actions` is an in-memory dict
+  that clears on every backend restart, but `/incidents` derived "unapproved" purely from the
+  audit log — old pre-restart proposals would show as pending forever yet 404 on `/approve`.
+  Added an `actionable` flag (`action_id in _pending_actions`) so only genuinely-approvable
+  proposals surface. Verified live end-to-end: loaded the console, took zero actions, triggered a
+  leak via curl only — a clean, single actionable card appeared within the watcher+autorefresh
+  window with no clicks.
+- [x] E-18 Feature-highlight grid at the top of the landing page (`ui/components/features.py`) —
+  LLM wiki, memory + escalation, runbook, rollback detection, proactive watcher, tracing +
+  dashboards, Slack, incident reports, multi-service — each tied to a real file, checkable, not
+  marketing copy. Also refreshed the stale "what's running" list (was hardcoded to 5 services,
+  now reflects all 9) and the stat chips (was "5 containers", now "9").
+- [x] E-19 Slack bot: added an `app_mention` handler (`@sreagent <question>`) alongside the
+  existing `/overwatch` slash command, same background-thread pattern. Also fixed the
+  restart/rollback verb in Slack's own response blocks (was hardcoded to "restart"). Verified
+  container reconnects cleanly with the new handler registered — **the actual mention round-trip
+  needs one more Slack-side config step only the user can do**: subscribe to the `app_mention`
+  bot event (Event Subscriptions) and grant `app_mentions:read`, same caveat as the slash command
+  needing to be registered separately from Socket Mode.
 
 ## Demo-ready gate (all must pass)
 - [x] Failure injection reliably reproduces on demand — `/leak`, `/slow`, `/crash` all tested

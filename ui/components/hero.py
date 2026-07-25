@@ -12,7 +12,7 @@ rendered via its own st.markdown() call.
 from .vitals import pulse_svg
 
 _META = [
-    "5 containers, 1 compose stack",
+    "9 containers, 1 compose stack",
     "read-only diagnosis tools",
     "human-approved restarts only",
     "watches proactively, every 30s",

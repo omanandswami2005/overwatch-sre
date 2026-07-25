@@ -30,6 +30,20 @@ def approve(action_id: str) -> dict:
     return r.json()
 
 
+def fetch_incidents():
+    """Unlike fetch_audit (the raw log), this is pre-grouped per action_id with
+    an `approved` flag - used to surface proposals from ANY source (the
+    watcher, the Slack bot, scripts/demo-trigger.sh) as actionable cards in
+    this console, not just ones the user typed here themselves.
+    """
+    try:
+        r = requests.get(f"{BACKEND_URL}/incidents", timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
+
+
 def generate_report(context: str) -> dict:
     r = requests.post(f"{BACKEND_URL}/report/generate", json={"context": context}, timeout=60)
     r.raise_for_status()

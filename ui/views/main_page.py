@@ -5,8 +5,9 @@ LANDING_PAGE is set by app.py after both st.Page objects exist.
 """
 
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
-from api import fetch_audit
+from api import fetch_audit, fetch_incidents
 from components import audit_drawer, chat, reports_panel, vitals
 
 LANDING_PAGE = None
@@ -14,6 +15,13 @@ DOCS_PAGE = None
 
 
 def render() -> None:
+    # Without this, Streamlit only re-renders on user interaction - a
+    # watcher-triggered proposal (or any state change) would sit invisible
+    # until someone happened to click/type something. 8s keeps the console
+    # feeling live without hammering the backend (audit/incidents are cheap
+    # JSONL reads).
+    st_autorefresh(interval=8000, key="console_autorefresh")
+
     nav = st.columns([1, 1, 6])
     if LANDING_PAGE is not None:
         nav[0].page_link(LANDING_PAGE, label="About", icon=":material/arrow_back:")
@@ -27,6 +35,7 @@ def render() -> None:
     st.session_state.pulse_tick += 1
 
     audit_events = fetch_audit()
+    chat.sync_pending_incidents(st.session_state.history, fetch_incidents())
 
     st.markdown('<div style="height:1.5rem"></div>', unsafe_allow_html=True)
     for service in ("target-app", "worker-service"):

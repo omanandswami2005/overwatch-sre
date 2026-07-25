@@ -11,6 +11,7 @@ respond() (uses the interaction's response_url under the hood).
 
 import logging
 import os
+import re
 import threading
 
 import requests
@@ -41,12 +42,15 @@ def _answer_blocks(result: dict) -> list[dict]:
     action = result.get("recommended_action")
     action_id = result.get("action_id")
     if action and action_id:
+        is_rollback = action.get("type") == "rollback_container"
+        verb = "roll back" if is_rollback else "restart"
+        approve_label = "Approve rollback" if is_rollback else "Approve restart"
         blocks.append(
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f":rotating_light: *Recommended:* restart `{action['container']}` — {action['reason']}",
+                    "text": f":rotating_light: *Recommended:* {verb} `{action['container']}` — {action['reason']}",
                 },
             }
         )
@@ -56,7 +60,7 @@ def _answer_blocks(result: dict) -> list[dict]:
                 "elements": [
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "Approve restart"},
+                        "text": {"type": "plain_text", "text": approve_label},
                         "style": "primary",
                         "action_id": "overwatch_approve",
                         "value": action_id,
@@ -73,6 +77,24 @@ def _answer_blocks(result: dict) -> list[dict]:
     return blocks
 
 
+def _investigate_and_reply(question: str, reply) -> None:
+    """Shared by the slash command and @mention handler - reply() is either
+    respond() (slash command, has a response_url) or say() (event, posts to
+    the channel directly). Runs in a background thread either way, since both
+    need to stay responsive while the real agent call (tens of seconds) runs.
+    """
+
+    def worker():
+        try:
+            result = _ask_backend(question)
+        except Exception as exc:
+            reply(text=f":x: Investigation failed: {exc}")
+            return
+        reply(blocks=_answer_blocks(result), text=result["answer"][:2900])
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 @app.command("/overwatch")
 def handle_overwatch(ack, respond, command):
     question = command["text"].strip()
@@ -80,16 +102,19 @@ def handle_overwatch(ack, respond, command):
         ack("Usage: `/overwatch <question>` — e.g. `/overwatch is target-app healthy?`")
         return
     ack(f":mag: Investigating: {question}")
+    _investigate_and_reply(question, respond)
 
-    def worker():
-        try:
-            result = _ask_backend(question)
-        except Exception as exc:
-            respond(text=f":x: Investigation failed: {exc}")
-            return
-        respond(blocks=_answer_blocks(result), text=result["answer"][:2900])
 
-    threading.Thread(target=worker, daemon=True).start()
+@app.event("app_mention")
+def handle_mention(event, say):
+    # event["text"] looks like "<@U0BKU6FLRB3> is target-app healthy?" - strip
+    # the mention itself, whichever user/bot ID it resolves to.
+    question = re.sub(r"^<@[^>]+>\s*", "", event.get("text", "")).strip()
+    if not question:
+        say(text="Mention me with a question — e.g. `@sreagent is target-app healthy?`")
+        return
+    say(text=f":mag: Investigating: {question}")
+    _investigate_and_reply(question, say)
 
 
 @app.action("overwatch_approve")
@@ -103,10 +128,13 @@ def handle_approve(ack, body, respond):
         except Exception as exc:
             respond(text=f":x: Approve failed: {exc}", replace_original=False)
             return
-        if result.get("status") == "restarted":
+        status = result.get("status")
+        if status == "restarted":
             respond(text=f":white_check_mark: Restarted `{result['container']}`.", replace_original=False)
+        elif status in ("no_previous_image", "previous_image_found_not_executed"):
+            respond(text=f":information_source: {result.get('message', status)}", replace_original=False)
         else:
-            respond(text=f":x: Restart failed: {result.get('error', 'unknown error')}", replace_original=False)
+            respond(text=f":x: Failed: {result.get('error', 'unknown error')}", replace_original=False)
 
     threading.Thread(target=worker, daemon=True).start()
 

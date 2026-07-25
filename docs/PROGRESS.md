@@ -234,6 +234,19 @@ in `CLAUDE.md`.
     workspace — needs the user to either register the slash command in the Slack App config
     (api.slack.com/apps → Slash Commands) if not already done, and then actually type
     `/overwatch <question>` in Slack. Confirm this before relying on it for a demo.
+  - **Also added**: an `@app_mention` handler (`@sreagent <question>`) alongside the slash
+    command — needs its own separate Slack-side step (Event Subscriptions → subscribe to
+    `app_mention`, grant `app_mentions:read`) before it'll receive anything, same class of
+    caveat as the slash command registration.
+- **Runbook, recurrence escalation, and rollback proposal** — see `docs/CHECKLIST.md` E-14
+  through E-16 for full detail. All three verified live against the running agent.
+- **Fixed a real UX gap**: the console required the user to ask a question themselves before any
+  watcher/Slack/script-triggered proposal became visible as an actionable card — see
+  `docs/CHECKLIST.md` E-17 for the full fix (`sync_pending_incidents` + `streamlit-autorefresh`)
+  and the second real bug it surfaced (`_pending_actions` resets on backend restart, `/incidents`
+  needed an `actionable` flag to avoid showing permanently-stuck cards).
+- **Feature-highlight grid + stale-content fixes on the landing page** — see `docs/CHECKLIST.md`
+  E-18.
 
 ## Proposed, discussed, not started
 

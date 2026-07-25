@@ -320,6 +320,15 @@ def incidents():
     """Groups audit events into per-action_id incidents: the diagnosis, whether it
     was approved, and the outcome. Asks with no proposed action (informational-only
     questions) are omitted — they're not incidents.
+
+    `actionable` distinguishes "still approvable right now" from "was proposed,
+    never approved, but the backend has restarted since" — _pending_actions is an
+    in-memory dict, cleared on every process restart, so an old unapproved
+    action_id from before a restart will 404 on /approve forever even though the
+    audit log still shows it as unapproved. Without this flag, a UI that
+    auto-surfaces pending proposals (so a watcher-triggered one doesn't require
+    someone to ask first) would show permanently-stuck, un-clickable cards after
+    any restart during development.
     """
     events = _read_audit()
     asks = {e["action_id"]: e for e in events if e.get("type") == "ask" and e.get("action_id")}
@@ -330,9 +339,11 @@ def incidents():
             "action_id": action_id,
             "question": ask_event["question"],
             "answer": ask_event["answer"],
+            "source": ask_event.get("source", "user"),
             "recommended_action": ask_event["recommended_action"],
             "asked_at": ask_event["ts"],
             "approved": action_id in approves,
+            "actionable": action_id in _pending_actions,
             "result": approves[action_id]["result"] if action_id in approves else None,
             "resolved_at": approves[action_id]["ts"] if action_id in approves else None,
         }
