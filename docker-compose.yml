@@ -122,5 +122,17 @@ services:
     depends_on:
       - backend
 
+  slack-bot:
+    build: ./slack-bot
+    container_name: slack-bot
+    environment:
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN:-}
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+    profiles:
+      - slack
+
 volumes:
   backend-data:
