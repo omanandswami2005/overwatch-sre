@@ -80,6 +80,18 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
   transient Streamlit "page not found" toast on a cold direct `/docs` URL paste, which clears in
   a few seconds and does **not** appear when navigating via the in-app link (the actual demo
   path) — verified both cases separately.
+- [x] E-11 Report-generation UI panel (`ui/components/reports_panel.py`, on the console) —
+  context input, generate button, rendered Markdown, Download .md / Download PDF, past-reports
+  list. Teammate's original spec called for a sidebar; this app's actual rebuilt layout has no
+  sidebar, so it renders as a console section instead. Driven end-to-end with real Playwright
+  clicks (not just curl): typed real context into the real textarea, clicked the real button,
+  watched the real spinner state, waited out the real two-stage LLM round trip. Found and fixed
+  a real bug this way — `st.expander` nested inside another `st.expander` threw
+  `StreamlitAPIException` (Streamlit disallows nesting); the backend pipeline itself worked fine
+  even while this was broken (report generated, audit went 27→28 events), confirming the bug was
+  UI-only. Rebuilt, re-ran the same real click flow, confirmed the full 7-section report renders,
+  both download buttons appear, and the past-reports list correctly shows all 4 real reports
+  generated across this session's testing.
 
 ## Demo-ready gate (all must pass)
 - [x] Failure injection reliably reproduces on demand — `/leak`, `/slow`, `/crash` all tested

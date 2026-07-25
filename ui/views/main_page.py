@@ -7,7 +7,7 @@ LANDING_PAGE is set by app.py after both st.Page objects exist.
 import streamlit as st
 
 from api import fetch_audit
-from components import audit_drawer, chat, vitals
+from components import audit_drawer, chat, reports_panel, vitals
 
 LANDING_PAGE = None
 DOCS_PAGE = None
@@ -39,3 +39,4 @@ def render() -> None:
     chat.handle_input(st.session_state.history)
 
     audit_drawer.render(audit_events)
+    reports_panel.render()

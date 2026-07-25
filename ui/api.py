@@ -28,3 +28,30 @@ def approve(action_id: str) -> dict:
     r = requests.post(f"{BACKEND_URL}/approve/{action_id}", timeout=15)
     r.raise_for_status()
     return r.json()
+
+
+def generate_report(context: str) -> dict:
+    r = requests.post(f"{BACKEND_URL}/report/generate", json={"context": context}, timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+
+def list_reports():
+    try:
+        r = requests.get(f"{BACKEND_URL}/reports", timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
+
+
+def report_markdown(report_id: str) -> str:
+    r = requests.get(f"{BACKEND_URL}/report/{report_id}/md", timeout=10)
+    r.raise_for_status()
+    return r.text
+
+
+def report_pdf(report_id: str) -> bytes:
+    r = requests.get(f"{BACKEND_URL}/report/{report_id}/pdf", timeout=20)
+    r.raise_for_status()
+    return r.content

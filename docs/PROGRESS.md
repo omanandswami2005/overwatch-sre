@@ -75,6 +75,28 @@ in `CLAUDE.md`.
     **the toast does not appear at all** in that path. Low real risk for a live demo driven
     through the app's own nav; only surfaces if someone bookmarks/shares the raw `/docs` URL and
     opens it cold.
+- **Report-generation UI panel** (`ui/components/reports_panel.py`, `ui/api.py`'s
+  `generate_report`/`list_reports`/`report_markdown`/`report_pdf`): context textarea, generate
+  button, rendered report, Download .md / Download PDF, past-reports list — the UI side of the
+  incident report pipeline the backend already had. The teammate's original spec (pasted earlier
+  in-session) called for a sidebar; this app's actual rebuilt layout has no sidebar (single
+  wide column, hidden nav), so it's a console section instead, matching the real design system
+  rather than the original spec literally.
+  - **Driven end-to-end with real Playwright clicks**, not curl: typed real text into the real
+    textarea (had to use `pressSequentially` + Tab-blur, since `.fill()` doesn't trigger
+    Streamlit's debounced onChange sync), clicked the real "Generate report" button, watched the
+    real "Extracting a brief, then writing the report..." spinner, waited out the real two-stage
+    Haiku/Sonnet round trip.
+  - **Found and fixed a real bug this way**: `st.expander` nested inside another `st.expander`
+    threw `StreamlitAPIException: Expanders may not be nested inside other expanders` —
+    Streamlit disallows nesting outright. Confirmed the backend pipeline itself was unaffected
+    (the report generated successfully even while the UI crashed rendering it — audit log went
+    27→28 events, success message showed), so this was purely a UI rendering bug, not a pipeline
+    bug. Fixed by using `st.container(border=True)` for the inner report display instead of a
+    second `st.expander`.
+  - **Re-verified after the fix**, same real click flow: the full 7-section report renders
+    correctly, both download buttons appear, and the past-reports list correctly shows all 4
+    real reports accumulated across this session's testing.
 - **Git/GitHub identity**: `omanandswami2005` / `omanandswami2005@gmail.com`, both `gh` and local
   git config. Real Anthropic API key was pasted into chat once — written only to gitignored
   `.env`, user was told to rotate it in the Anthropic Console regardless.
