@@ -125,7 +125,7 @@ replacement for what HolmesGPT's toolset config used to provide (see
 | `scripts/demo-trigger.sh` | One-command demo reset/trigger (`leak`/`crash`/`slow`/`reset`), no raw `curl` needed | — |
 | `ui/app.py` | Multi-page router (`st.navigation`) — landing page (`/`) + console (`/main`) | C |
 | `ui/api.py` | The only module in `ui/` that talks to the network — thin HTTP client against the backend | C |
-| `ui/theme.py`, `ui/components/`, `ui/views/` | Modular Streamlit UI: reusable components + per-route views | C |
+| `ui/theme.py`, `ui/components/`, `ui/views/` | Modular Streamlit UI: reusable components + per-route views (`/`, `/main`, `/docs`) | C |
 | `ui/.streamlit/config.toml` | Dark theme tokens matching UI-DESIGN.md | C |
 | `docker-compose.yml` | Orchestrates all 7 containers; backend gets Docker socket + `backend-data` volume (audit log + wiki + reports) | A/B |
 | `.env.example` | Template for `.env` — `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `HAIKU_MODEL`, `SLACK_WEBHOOK_URL`, `WATCH_*` — `.env` itself is gitignored | — |

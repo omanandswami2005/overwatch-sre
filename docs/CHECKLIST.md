@@ -71,6 +71,13 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
   recent `ask`/`approve`; re-verified live against a real leak → approve cycle, including a case
   where a second, watcher-triggered proposal was genuinely concurrent — confirmed the fix
   correctly reports "awaiting approval" for that real pending state, not a false positive.
+- [x] E-10 Refreshed the architecture Artifact for Jaeger/Grafana/reports/the merge (old link
+  died mid-session — new URL, see `docs/PROGRESS.md`), and added the same briefing as an in-app
+  `/docs` route (`ui/views/docs_page.py`, `ui/components/mermaid.py`) so it's always live with
+  the demo. Verified everything checkable without a browser tool (HTTP 200, zero server errors,
+  generated HTML/JS inspected byte-for-byte, diagram syntax bracket-balanced, mermaid.js CDN
+  confirmed live) — **no real browser was available this session, so the final visual render was
+  not screenshotted**; open `/docs` yourself to confirm before a live demo.
 
 ## Demo-ready gate (all must pass)
 - [x] Failure injection reliably reproduces on demand — `/leak`, `/slow`, `/crash` all tested

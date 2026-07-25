@@ -164,6 +164,35 @@ button:focus-visible {{ outline: 2px solid {c['vital']} !important; outline-offs
 .vitals-pulse {{ display: inline-flex; }}
 .vitals-pulse svg {{ width: 150px; height: 22px; display: block; }}
 .vitals-label {{ color: {c['muted']}; margin-left: auto; font-size: 0.85rem; }}
+
+/* --- /docs page --- */
+.docs-page > * {{ margin-bottom: 2.6rem; }}
+.docs-eyebrow {{
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; letter-spacing: 0.12em;
+  color: {c['muted']}; text-transform: uppercase; display: flex; gap: 0.6rem; align-items: baseline;
+  margin-bottom: 0.5rem;
+}}
+.docs-eyebrow .num {{ color: {c['vital']}; font-weight: 500; }}
+.docs-dek {{ font-family: 'Inter', sans-serif; font-size: 0.95rem; color: {c['haze']}; line-height: 1.6; max-width: 68ch; }}
+.docs-callout {{
+  display: flex; gap: 0.7rem; align-items: flex-start; background: rgba(53,208,166,0.1);
+  border: 1px solid rgba(53,208,166,0.35); border-radius: 10px; padding: 0.85rem 1rem;
+  font-family: 'Inter', sans-serif; font-size: 0.9rem; color: {c['paper']}; line-height: 1.55;
+}}
+.docs-callout.alert {{ background: rgba(245,166,35,0.1); border-color: rgba(245,166,35,0.35); }}
+.docs-callout .mark {{ font-family: 'JetBrains Mono', monospace; color: {c['vital']}; font-weight: 500; flex-shrink: 0; }}
+.docs-callout.alert .mark {{ color: {c['alert']}; }}
+table.docs-compare {{ width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif; font-size: 0.88rem; }}
+table.docs-compare th {{
+  font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: {c['muted']}; text-align: left; font-weight: 500;
+  padding: 0 0.9rem 0.6rem 0; border-bottom: 1px solid {c['border']};
+}}
+table.docs-compare td {{ padding: 0.65rem 0.9rem 0.65rem 0; border-bottom: 1px solid {c['border']}; vertical-align: top; color: {c['haze']}; }}
+table.docs-compare tr:last-child td {{ border-bottom: none; }}
+.docs-pill {{ display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 999px; white-space: nowrap; }}
+.docs-pill.ours {{ background: rgba(53,208,166,0.14); color: {c['vital']}; border: 1px solid rgba(53,208,166,0.4); }}
+.docs-pill.dep {{ background: rgba(245,166,35,0.12); color: {c['alert']}; border: 1px solid rgba(245,166,35,0.35); }}
 </style>""",
         unsafe_allow_html=True,
     )

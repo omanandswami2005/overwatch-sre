@@ -10,11 +10,15 @@ from api import fetch_audit
 from components import audit_drawer, chat, vitals
 
 LANDING_PAGE = None
+DOCS_PAGE = None
 
 
 def render() -> None:
+    nav = st.columns([1, 1, 6])
     if LANDING_PAGE is not None:
-        st.page_link(LANDING_PAGE, label="About this project", icon=":material/arrow_back:")
+        nav[0].page_link(LANDING_PAGE, label="About", icon=":material/arrow_back:")
+    if DOCS_PAGE is not None:
+        nav[1].page_link(DOCS_PAGE, label="Architecture", icon=":material/schema:")
 
     if "history" not in st.session_state:
         st.session_state.history = []

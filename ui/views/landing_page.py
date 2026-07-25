@@ -12,6 +12,7 @@ from api import fetch_audit
 from components import footer, landing, vitals
 
 MAIN_PAGE = None
+DOCS_PAGE = None
 
 
 def render() -> None:
@@ -24,7 +25,10 @@ def render() -> None:
 
     landing.render(status, st.session_state.pulse_tick)
 
+    nav = st.columns([1, 1, 6])
     if MAIN_PAGE is not None:
-        st.page_link(MAIN_PAGE, label="Launch the console", icon=":material/arrow_forward:")
+        nav[0].page_link(MAIN_PAGE, label="Launch the console", icon=":material/arrow_forward:")
+    if DOCS_PAGE is not None:
+        nav[1].page_link(DOCS_PAGE, label="Architecture", icon=":material/schema:")
 
     footer.render()
