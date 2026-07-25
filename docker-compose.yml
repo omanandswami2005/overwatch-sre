@@ -38,9 +38,18 @@ services:
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-5}
       - PROMETHEUS_URL=http://prometheus:9090
       - AUDIT_LOG_PATH=/data/audit-log.jsonl
+      - WIKI_DIR=/data/wiki
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - WATCH_ENABLED=${WATCH_ENABLED:-true}
+      - WATCH_INTERVAL_SECONDS=${WATCH_INTERVAL_SECONDS:-30}
+      - WATCH_CONTAINERS=${WATCH_CONTAINERS:-target-app}
+      - LEAK_THRESHOLD_BYTES=${LEAK_THRESHOLD_BYTES:-50000000}
+      - WATCH_COOLDOWN_SECONDS=${WATCH_COOLDOWN_SECONDS:-300}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - audit-log:/data
+      - backend-data:/data
+      - ./backend:/app
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     depends_on:
       - prometheus
 
@@ -53,4 +62,4 @@ services:
       - backend
 
 volumes:
-  audit-log:
+  backend-data:

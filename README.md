@@ -62,14 +62,16 @@ docker compose up --build
 # ui           :8501
 ```
 
-Env needed: `ANTHROPIC_API_KEY` in `.env`.
+Env needed: `cp .env.example .env` and fill in `ANTHROPIC_API_KEY`.
 
 ## Demo script (for judges)
 
 1. Hit `/leak` on the target app → memory climbs.
-2. Ask the copilot: "why is checkout-service unhealthy?"
+2. Ask the copilot: "why is target-app unhealthy?"
 3. It correlates Prometheus memory graph + container logs, names the cause, proposes a restart.
 4. Click **Approve** → container restarts → confirm health recovers.
 5. Show `audit-log.jsonl` — every step logged.
+
+Verified end-to-end (see [docs/CHECKLIST.md](docs/CHECKLIST.md)) — this script runs as described. `/crash` and `/slow` work the same way and are good backup demo beats if `/leak` alone feels thin; `/slow` is a good one to show the agent *not* over-recommending a restart when the issue is self-resolving.
 
 See [docs/CHECKLIST.md](docs/CHECKLIST.md) for the task breakdown and who's building what, and [docs/architecture.md](docs/architecture.md) for the full system + sequence diagrams.
