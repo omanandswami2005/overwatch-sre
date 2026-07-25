@@ -4,6 +4,24 @@ services:
     container_name: target-app
     ports:
       - "8080:8080"
+    environment:
+      - OTEL_SERVICE_NAME=target-app
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=none
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"   # UI + Query API
+      - "4317:4317"     # OTLP gRPC receiver
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
@@ -28,6 +46,23 @@ services:
       - target-app
       - cadvisor
 
+  grafana:
+    image: grafana/grafana:13.0.2
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - jaeger
+
   backend:
     build: ./backend
     container_name: backend
@@ -37,6 +72,10 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-5}
       - PROMETHEUS_URL=http://prometheus:9090
+      - JAEGER_QUERY_URL=http://jaeger:16686
+      - GRAFANA_URL=http://grafana:3000
+      - GRAFANA_ADMIN_USER=admin
+      - GRAFANA_ADMIN_PASSWORD=admin
       - AUDIT_LOG_PATH=/data/audit-log.jsonl
       - WIKI_DIR=/data/wiki
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
@@ -52,6 +91,8 @@ services:
     command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     depends_on:
       - prometheus
+      - jaeger
+      - grafana
 
   ui:
     build: ./ui

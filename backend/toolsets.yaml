@@ -12,3 +12,5 @@ toolsets:
     enabled: true
   wiki:
     enabled: true
+  jaeger:
+    enabled: true

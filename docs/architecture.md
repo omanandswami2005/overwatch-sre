@@ -19,7 +19,16 @@ from a normal monitoring stack.
 A live, judge-facing visual version of this document (system diagram, the core loop, the
 librarian/wiki boundary, the toolset plugin diagram, and an honest "built vs. integrated" +
 scalability breakdown) is published as an Artifact — ask in-session for the current link if you
-need it; it isn't tracked in the repo since it's a presentation aid, not source of truth.
+need it; it isn't tracked in the repo since it's a presentation aid, not source of truth. It
+predates the tracing/dashboard work below and hasn't been refreshed for it yet.
+
+**Tracing (Jaeger) and dashboards (Grafana) were added after this doc's diagrams were drawn** —
+`target-app` is OTel-instrumented and exports to `jaeger`, `backend/toolsets/jaeger_toolset.py`
+gives the chat agent a `query_traces` tool, and `grafana/` provisions a real dashboard plus
+restart annotations pushed from `/approve`. All verified for real, not just wired — see
+[docs/PROGRESS.md](PROGRESS.md) for exact verification steps and a real cAdvisor label
+limitation on Docker Desktop that was found and worked around. The diagrams in this file don't
+show these two services yet; treat `docs/PROGRESS.md` as more current until they're redrawn.
 
 ## System overview
 

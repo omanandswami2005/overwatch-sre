@@ -1,0 +1,95 @@
+{
+  "title": "Overwatch — target-app",
+  "uid": "overwatch-target-app",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": false,
+        "iconColor": "rgba(53, 208, 166, 1)",
+        "name": "Restarts (pushed by backend on /approve)",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "app_leak_bytes (target-app self-reported)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "fillOpacity": 15, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "app_leak_bytes", "legendFormat": "app_leak_bytes", "refId": "A" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Docker memory, all containers (cadvisor)",
+      "description": "cAdvisor on this host doesn't expose a per-container name/image label (verified: only the raw cgroup id label is present, no container_label_* metrics at all) - a Docker Desktop cgroup-visibility limitation, not a scrape config bug. Aggregated across all containers as the reliable alternative; app_leak_bytes above is the target-app-specific signal.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "fillOpacity": 15, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(container_memory_usage_bytes{id=~\"/docker/.+\"})",
+          "legendFormat": "all containers",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Docker CPU, all containers (cadvisor)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "custom": { "fillOpacity": 15, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(container_cpu_usage_seconds_total{id=~\"/docker/.+\"}[1m]))",
+          "legendFormat": "all containers",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "target-app scrape health",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" } } },
+            { "type": "value", "options": { "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "value": null, "color": "green" }] }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "up{job=\"target-app\"}", "legendFormat": "target-app", "refId": "A" }
+      ]
+    }
+  ]
+}
