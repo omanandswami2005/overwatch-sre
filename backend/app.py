@@ -6,10 +6,13 @@ from pathlib import Path
 
 import anthropic
 import docker
+import requests
 import yaml
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
 
+import reports
 import watcher
 from librarian import WIKI_DIR, run_librarian
 from notifications import annotate_grafana, notify_slack
@@ -22,6 +25,7 @@ AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
 
 PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://prometheus:9090")
 JAEGER_QUERY_URL = os.environ.get("JAEGER_QUERY_URL", "http://jaeger:16686")
+TARGET_APP_URL = os.environ.get("TARGET_APP_URL", "http://target-app:8080")
 MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 TOOLSETS_CONFIG_PATH = Path(os.environ.get("TOOLSETS_CONFIG_PATH", "toolsets.yaml"))
 MAX_TOOL_ROUNDS = 6
@@ -268,6 +272,77 @@ def incidents():
     ]
     result.sort(key=lambda i: i["asked_at"], reverse=True)
     return result
+
+
+class ReportRequest(BaseModel):
+    context: str
+    container: str = "target-app"
+
+
+@app.post("/report/generate")
+def report_generate(req: ReportRequest):
+    """Two-stage pipeline (backend/reports.py): Haiku compresses raw audit-log +
+    Prometheus range data into a structured brief, Sonnet writes the actual
+    7-section postmortem from that brief + the developer's own context. Not an
+    agent tool - triggered directly by a human request, same reasoning as every
+    other side-effecting action in this system: deterministic trigger, not model
+    discretion over when to run.
+    """
+    try:
+        result = reports.generate_report(req.context, req.container)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"report generation failed: {exc}") from exc
+    _audit({"type": "report_generated", "report_id": result["id"], "context": req.context})
+    return result
+
+
+@app.get("/reports")
+def reports_list():
+    return reports.list_reports()
+
+
+@app.get("/report/{report_id}/md")
+def report_get_md(report_id: str):
+    try:
+        text = reports.get_report_markdown(report_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="unknown report id")
+    return PlainTextResponse(text, media_type="text/markdown")
+
+
+@app.get("/report/{report_id}/pdf")
+def report_get_pdf(report_id: str):
+    try:
+        pdf_bytes = reports.get_report_pdf(report_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="unknown report id")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"PDF render failed: {exc}") from exc
+    return Response(
+        pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{report_id}.pdf"'},
+    )
+
+
+_DEMO_TRIGGER_ENDPOINTS = {"leak", "crash", "slow", "reset"}
+
+
+@app.post("/demo/trigger/{mode}")
+def demo_trigger(mode: str):
+    """Demo convenience only - proxies to target-app's own failure-injection
+    endpoints so a UI button (or scripts/demo-trigger.sh) doesn't need to know
+    target-app exists. Not part of the real API contract in CLAUDE.md; this is
+    purely for making live demos reliable, not a capability the agent can reach.
+    """
+    if mode not in _DEMO_TRIGGER_ENDPOINTS:
+        raise HTTPException(status_code=400, detail=f"mode must be one of {_DEMO_TRIGGER_ENDPOINTS}")
+    try:
+        r = requests.get(f"{TARGET_APP_URL}/{mode}", timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"target-app call failed: {exc}") from exc
 
 
 @app.get("/healthz")

@@ -71,13 +71,16 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-5}
+      - HAIKU_MODEL=${HAIKU_MODEL:-claude-haiku-4-5-20251001}
       - PROMETHEUS_URL=http://prometheus:9090
       - JAEGER_QUERY_URL=http://jaeger:16686
       - GRAFANA_URL=http://grafana:3000
       - GRAFANA_ADMIN_USER=admin
       - GRAFANA_ADMIN_PASSWORD=admin
+      - TARGET_APP_URL=http://target-app:8080
       - AUDIT_LOG_PATH=/data/audit-log.jsonl
       - WIKI_DIR=/data/wiki
+      - REPORTS_DIR=/data/reports
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
       - WATCH_ENABLED=${WATCH_ENABLED:-true}
       - WATCH_INTERVAL_SECONDS=${WATCH_INTERVAL_SECONDS:-30}

@@ -40,6 +40,28 @@ Lane C can build the full chat + approve flow against a hardcoded fixture matchi
   ask copilot, (for `/leak`/`/crash`) approve restart, confirm recovery — _(owner: )_
 - [x] D-2 rehearsed demo script from README against `/leak` — matches step-for-step — _(owner: )_
 
+**Wave 3 — beyond the original scope, added deliberately (see `docs/PROGRESS.md` for why each)**
+- [x] E-1 Librarian agent + self-updating wiki (`backend/librarian.py`, `wiki_toolset.py`) —
+  verified: wiki pages written after approved restarts, cited correctly on follow-up questions
+- [x] E-2 Slack notifications + Grafana incident annotations (`backend/notifications.py`) —
+  verified against real endpoints
+- [x] E-3 Proactive watcher (`backend/watcher.py`) — verified live, zero manual `/ask` needed
+- [x] E-4 OpenTelemetry tracing → Jaeger + `query_traces` tool — verified: real traces, real
+  agent tool use
+- [x] E-5 Grafana dashboard (4 panels + restart annotations) — verified real data through
+  Grafana's own API, including a real cAdvisor label limitation found and worked around
+- [x] E-6 Docker build speed: BuildKit cache mounts (uv + apt) across all 3 Dockerfiles,
+  `.dockerignore` added — verified with a forced `--no-cache` rebuild staying fast
+- [x] E-7 `scripts/demo-trigger.sh` + `POST /demo/trigger/{mode}` backend passthrough — verified
+  live, one-command demo reset/trigger without needing raw `curl`
+- [x] E-8 Incident report pipeline: Haiku extracts a compressed brief from raw audit-log +
+  Prometheus range data, Sonnet synthesizes a 7-section Markdown postmortem, WeasyPrint renders
+  PDF on demand (`POST /report/generate`, `GET /report/{id}/md`, `GET /report/{id}/pdf`,
+  `GET /reports`) — verified: real report citing real action IDs/timestamps from this session,
+  real PDF confirmed via `file` (`PDF document, version 1.7`)
+- [ ] E-9 Merge Lane C's UI work from the `Prasad` branch, test UI+backend together for real —
+  in progress
+
 ## Demo-ready gate (all must pass)
 - [x] Failure injection reliably reproduces on demand — `/leak`, `/slow`, `/crash` all tested
 - [x] Copilot correctly names the root cause unprompted — memory leak (cites `app_leak_bytes` +

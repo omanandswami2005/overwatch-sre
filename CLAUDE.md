@@ -119,12 +119,14 @@ replacement for what HolmesGPT's toolset config used to provide (see
 | `backend/librarian.py` | Isolated archivist agent — only tool is `write_wiki_pages`, triggered post-approve | B |
 | `backend/notifications.py` | `notify_slack()` + `annotate_grafana()` — both best-effort, no-op if unconfigured | B |
 | `backend/watcher.py` | Background thread — proactive checks, triggers `_handle_ask` on trip | B |
-| `backend/Dockerfile` | plain `python:3.11-slim` + fastapi/uvicorn/anthropic/docker/pyyaml/requests via `uv` | B |
+| `backend/reports.py` | Haiku-extract → Sonnet-synthesize incident postmortem pipeline + WeasyPrint PDF | B |
+| `backend/Dockerfile` | `python:3.11-slim` + apt (WeasyPrint native libs) + fastapi/uvicorn/anthropic/docker/pyyaml/requests/markdown/weasyprint via `uv` | B |
 | `grafana/provisioning/`, `grafana/dashboards/overwatch.json` | Provisioned Prometheus+Jaeger datasources, one real dashboard | A |
+| `scripts/demo-trigger.sh` | One-command demo reset/trigger (`leak`/`crash`/`slow`/`reset`), no raw `curl` needed | — |
 | `ui/app.py` | Streamlit chat UI, pure HTTP client against the backend, no logic of its own | C |
 | `ui/.streamlit/config.toml` | Dark theme tokens matching UI-DESIGN.md | C |
-| `docker-compose.yml` | Orchestrates all 7 containers; backend gets Docker socket + `backend-data` volume (audit log + wiki) | A/B |
-| `.env.example` | Template for `.env` — `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `SLACK_WEBHOOK_URL`, `WATCH_*` — `.env` itself is gitignored | — |
+| `docker-compose.yml` | Orchestrates all 7 containers; backend gets Docker socket + `backend-data` volume (audit log + wiki + reports) | A/B |
+| `.env.example` | Template for `.env` — `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `HAIKU_MODEL`, `SLACK_WEBHOOK_URL`, `WATCH_*` — `.env` itself is gitignored | — |
 
 Lanes work in parallel and should stay out of each other's files (per `docs/CHECKLIST.md`). If
 you're picking up a task, check whether it's claimed (owner line in `docs/CHECKLIST.md`) before
@@ -144,6 +146,15 @@ starting.
   `librarian_error`), each with a `ts`.
 - `GET /incidents` → audit events grouped into `{ask, approve}` pairs by `action_id` — asks
   with no proposed action are omitted (not incidents).
+- `POST /report/generate {context, container?}` → `{id, created_at}` — two-stage pipeline
+  (`backend/reports.py`): Haiku compresses raw audit-log + Prometheus range data into a brief,
+  Sonnet writes a 7-section Markdown postmortem from that brief + `context`. Not an agent tool —
+  triggered directly by a human request.
+- `GET /reports` → list of generated reports. `GET /report/{id}/md` → raw Markdown.
+  `GET /report/{id}/pdf` → rendered PDF (WeasyPrint), `application/pdf`.
+- `POST /demo/trigger/{mode}` (`mode` ∈ `leak`/`crash`/`slow`/`reset`) → proxies to
+  `target-app`'s own endpoint. Demo convenience only, not part of the real contract above — lets
+  a future UI button trigger a scenario without knowing `target-app` exists directly.
 - `GET /healthz` → liveness check.
 
 UI renders strictly against this shape — see `ui/app.py`'s `fetch_audit()` / chat flow. Don't

@@ -90,6 +90,58 @@ in `CLAUDE.md`.
     a JSON log."
   - Every panel query and the annotation were confirmed with real data through Grafana's own API
     (`/api/datasources/proxy/...`, `/api/annotations`), not just "the YAML looks right."
+- **Docker build speed** — root cause confirmed before fixing anything (didn't guess): all three
+  Dockerfiles used `uv pip install --no-cache`, which re-downloads every wheel from scratch on
+  every build; no `.dockerignore` existed anywhere. Fixed with the standard BuildKit
+  `--mount=type=cache` pattern (uv cache + apt cache), which persists the *download* cache across
+  builds without baking it into the image — same installed packages, same final layers, just
+  faster to rebuild. **Verified, not assumed**: forced a `--no-cache` rebuild of `target-app`
+  (bypassing Docker's own layer cache entirely) and confirmed the install step stayed fast
+  because the separate BuildKit cache mount still had the wheels.
+- **One-command demo trigger** — `scripts/demo-trigger.sh leak|crash|slow|reset` (resets,
+  triggers, optionally asks the copilot, prints next steps) plus a `POST
+  /demo/trigger/{mode}` backend passthrough to `target-app`'s endpoints, so a future UI button
+  doesn't need to know `target-app` exists directly. Both verified live. The passthrough's error
+  path was also verified for real: called it while `target-app` happened to be crashed from
+  testing and got a clear 502 with the actual connection error, not a hang or a crash.
+- **Incident report pipeline** (`backend/reports.py`) — a genuine two-stage
+  cheap-model/smart-model architecture, not hackathon-only wiring:
+  - **Stage 1 (Haiku, `claude-haiku-4-5-20251001`)**: reads raw `audit-log.jsonl` (time-windowed)
+    + Prometheus `query_range` data, compresses into a structured brief via one forced tool call
+    (`extract_brief`) — same "force `tool_choice`, one call" pattern as the librarian.
+  - **Stage 2 (Sonnet, the main `ANTHROPIC_MODEL`)**: writes the actual 7-section Markdown
+    postmortem (Summary, Impact, Timeline, Root Cause, Resolution, Detection, Action Items) from
+    the compressed brief + the developer's own plain-English context.
+  - Researched, not assumed: this Haiku-compresses/Sonnet-writes split is a real, current
+    recommended pattern (Haiku holds ~2-5% quality gap vs. Sonnet on extraction/classification at
+    a fraction of the cost) — this is the actual answer to "what's implemented for context
+    optimization," not just a talking point.
+  - `.md` saved to `REPORTS_DIR` (under the same `backend-data` volume as the wiki/audit log),
+    PDF rendered on demand via WeasyPrint (`markdown` → HTML → CSS-styled → PDF).
+  - New endpoints: `POST /report/generate {context, container}`, `GET /reports`,
+    `GET /report/{id}/md`, `GET /report/{id}/pdf`. Not agent tools — triggered directly by a
+    human request, same "deterministic trigger, not model discretion" reasoning as every other
+    side-effecting action in this system.
+  - **Real platform issue found and fixed mid-build**: the base image is Debian trixie, where
+    `libgdk-pixbuf2.0-0` (the package name from most WeasyPrint docs/tutorials, which target
+    older Debian) was renamed to `libgdk-pixbuf-2.0-0`. Found via `apt-cache search` inside the
+    actual base image rather than guessing a second time.
+  - **Verified end-to-end for real**: generated a report against this session's actual leak/crash
+    history — the Markdown correctly cites real action IDs (`4dc5c6fb...`, `84a2b5a3...`,
+    `39329720...`, `a31fe84d...`) and real timestamps from the real audit log, no hallucinated
+    data. PDF confirmed via the `file` command: `PDF document, version 1.7`, real byte content,
+    not an empty/broken file.
+- **No UI changes made** in any of this session's backend work — confirmed by design, and by
+  `git status` showing zero touches to `ui/app.py` throughout.
+
+## In progress right now
+
+- **Merging Lane C's UI work from the `Prasad` branch** — teammate pushed real UI work to
+  `origin/Prasad`. Plan: diff against `main`, keep all UI code, decide file-by-file on anything
+  else that differs, merge, then test the real UI against this backend end-to-end (not just
+  curl) before calling it done. Backend's HTTP contract (`/ask`, `/approve/{id}`, `/audit`,
+  `/incidents`) hasn't changed shape, so this should be a clean merge, but verify for real rather
+  than assuming.
 
 ## Proposed, discussed, not started
 
@@ -117,11 +169,7 @@ in `CLAUDE.md`.
   **Not started, not committed to** — flagged as optional, pending user priority call given time
   left.
 
-- **One-command demo trigger/reset script** — requested ("must need something while giving demo
-  to trigger the things again"). `target-app` already exposes `/leak`, `/crash`, `/slow`,
-  `/reset` — the primitives exist. What's missing is a convenience wrapper (e.g.
-  `scripts/demo-leak.sh` doing reset → leak ×N → print next steps) so a live demo doesn't depend
-  on typing raw `curl` commands correctly under pressure. **Not started.**
+- ~~One-command demo trigger/reset script~~ — **done**, see above.
 
 - **GitHub PR from incident writeups** — deferred (not dropped) pending a `GITHUB_TOKEN` with
   repo write scope. Wiki files already exist as plain markdown specifically so "open a PR with

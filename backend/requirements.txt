@@ -4,3 +4,7 @@ docker==7.*
 requests==2.32.*
 anthropic>=0.39.0,<1.0.0
 pyyaml==6.*
+markdown==3.*
+# unpinned - couples to native libs installed via apt in the Dockerfile, safer
+# to let pip resolve a version compatible with whatever's actually on the image
+weasyprint
